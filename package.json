@@ -49,6 +49,7 @@
   },
   "dependencies": {
     "async": "^2.1.4",
+    "debug": "^2.5.1",
     "isemail": "^1.2.0",
     "strong-globalize": "^2.8.0"
   }
