@@ -48,6 +48,7 @@
     }
   },
   "dependencies": {
+    "async": "^2.1.4",
     "isemail": "^1.2.0"
   }
 }
