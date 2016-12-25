@@ -1,0 +1,53 @@
+{
+  "name": "loopback-multi-emails-and-phones-mixin",
+  "version": "0.0.0-development",
+  "description": "A mixin to enable including Through model properties",
+  "main": "include-through.js",
+  "scripts": {
+    "test": "./node_modules/mocha/bin/mocha --recursive ./test",
+    "posttest": "npm run lint",
+    "lint": "eslint ./*.js",
+    "commit": "git-cz",
+    "semantic-release": "semantic-release pre && npm publish && semantic-release post"
+  },
+  "devDependencies": {
+    "chai": "^3.5.0",
+    "commitizen": "^2.8.6",
+    "cz-conventional-changelog": "^1.2.0",
+    "dirty-chai": "^1.2.2",
+    "eslint": "^3.11.1",
+    "eslint-config-loopback": "^5.0.0",
+    "loopback": "^3.0.0",
+    "loopback-boot": "^2.23.0",
+    "mocha": "^3.2.0",
+    "semantic-release": "^6.3.2",
+    "sinon": "^1.17.6",
+    "sinon-chai": "^2.8.0",
+    "strong-error-handler": "^1.1.1",
+    "supertest": "^2.0.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JonnyBGod/loopback-multi-emails-and-phones-mixin.git"
+  },
+  "keywords": [
+    "loopback",
+    "include",
+    "through",
+    "mixin"
+  ],
+  "author": "João Ribeiro <jonnybgod@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/JonnyBGod/loopback-multi-emails-and-phones-mixin/issues"
+  },
+  "homepage": "https://github.com/JonnyBGod/loopback-multi-emails-and-phones-mixin#readme",
+  "config": {
+    "commitizen": {
+      "path": "./node_modules/cz-conventional-changelog"
+    }
+  },
+  "dependencies": {
+    "isemail": "^1.2.0"
+  }
+}

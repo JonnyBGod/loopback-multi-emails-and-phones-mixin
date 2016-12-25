@@ -1,0 +1,69 @@
+{
+  "_meta": {
+    "sources": [
+      "../common/models",
+      "./models",
+      "../../../../models"
+    ],
+    "mixins": [
+      "../../../../"
+    ]
+  },
+  "Email": {
+    "dataSource": "mail",
+    "public": false
+  },
+  "Phone": {
+    "dataSource": "phone",
+    "public": false
+  },
+  "User": {
+    "dataSource": "db",
+    "public": true,
+    "relations": {
+      "posts": {
+        "model": "Post",
+        "type": "hasMany",
+        "foreignKey": "userId"
+      }
+    },
+    "acls": [
+      {
+        "permission": "ALLOW",
+        "principalType": "ROLE",
+        "principalId": "$owner"
+      }
+    ],
+    "mixins": {
+      "MultiEmailsAndPhones": true
+    }
+  },
+  "AccessToken": {
+    "dataSource": "db",
+    "public": false
+  },
+  "ACL": {
+    "dataSource": "db",
+    "public": false
+  },
+  "RoleMapping": {
+    "dataSource": "db",
+    "public": false
+  },
+  "Role": {
+    "dataSource": "db",
+    "public": false
+  },
+  "myUser": {
+    "dataSource": "db",
+    "public": true
+  },
+  "blog": {
+    "dataSource": "db",
+    "public": true
+  },
+  "Post": {
+    "dataSource": "db",
+    "public": true
+  }
+}

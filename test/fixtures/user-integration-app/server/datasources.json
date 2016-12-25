@@ -1,0 +1,17 @@
+{
+  "db": {
+    "connector": "memory"
+  },
+  "mail": {
+    "connector": "mail",
+    "transports": [
+      {"type": "STUB"}
+    ]
+  },
+  "phone": {
+    "connector": "mail",
+    "transports": [
+      {"type": "STUB"}
+    ]
+  }
+}
