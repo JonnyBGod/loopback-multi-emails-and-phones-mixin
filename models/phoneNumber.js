@@ -260,20 +260,6 @@ module.exports = function(PhoneNumber) {
       message: g.f('Must provide a valid phone'),
     });
 
-    // TODO: activate onde https://github.com/strongloop/loopback-datasource-juggler/pull/900
-    // Realm users validation
-    /*if (PhoneNumberModel.settings.realmRequired && PhoneNumberModel.settings.realmDelimiter) {
-      PhoneNumberModel.validate('phone', validateUniqueness, {
-        message: g.f('Phone already exists'),
-        scopedTo: ['realm'],
-      });
-    } else {
-      // Regular(Non-realm) users validation
-      PhoneNumberModel.validate('phone', validateUniqueness, {
-        message: g.f('Phone already exists'),
-      });
-    }*/
-
     return PhoneNumberModel;
   };
 

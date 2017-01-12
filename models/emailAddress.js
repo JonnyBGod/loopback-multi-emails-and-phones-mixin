@@ -265,20 +265,6 @@ module.exports = function(EmailAddress) {
       message: g.f('Must provide a valid email'),
     });
 
-    // TODO: activate onde https://github.com/strongloop/loopback-datasource-juggler/pull/900
-    // Realm users validation
-    /*if (EmailAddressModel.settings.realmRequired && EmailAddressModel.settings.realmDelimiter) {
-      EmailAddressModel.validate('email', validateUniqueness, {
-        message: g.f('Email already exists'),
-        scopedTo: ['realm'],
-      });
-    } else {
-      // Regular(Non-realm) users validation
-      EmailAddressModel.validate('email', validateUniqueness, {
-        message: g.f('Email already exists'),
-      });
-    }*/
-
     return EmailAddressModel;
   };
 

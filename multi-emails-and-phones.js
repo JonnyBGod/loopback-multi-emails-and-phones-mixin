@@ -14,12 +14,6 @@ var debug = require('debug')('loopback:user');
 module.exports = function(User) {
   delete User.validations.email;
 
-  User.defineProperty('email', {type: String, required: false});
-  User.defineProperty('phone', {type: String, required: false});
-
-  User.settings.hidden.push('email');
-  User.settings.hidden.push('phone');
-
   var Phone = User.registry.createModel(require('./models/phone.json'));
   require('./models/phone.js')(Phone);
 
@@ -29,10 +23,7 @@ module.exports = function(User) {
     dataSource: User.getDataSource(),
   });
 
-  EmailAddress.settings.verificationRequired = User.settings.emailVerificationRequired;
-  EmailAddress.settings.caseSensitiveEmail = User.settings.caseSensitiveEmail;
-  EmailAddress.settings.realmRequired = User.settings.realmRequired;
-  EmailAddress.settings.realmDelimiter = User.settings.realmDelimiter;
+  User.embedsMany(EmailAddress, {as: 'emails', options: {persistent: true, validate: false}});
 
   var PhoneNumber = User.registry.createModel(require('./models/phoneNumber.json'));
   require('./models/phoneNumber.js')(PhoneNumber);
@@ -40,27 +31,17 @@ module.exports = function(User) {
     dataSource: User.getDataSource(),
   });
 
-  PhoneNumber.settings.verificationRequired = User.settings.emailVerificationRequired;
-  PhoneNumber.settings.realmRequired = User.settings.realmRequired;
-  PhoneNumber.settings.realmDelimiter = User.settings.realmDelimiter;
-
-  User.embedsMany(EmailAddress, {as: 'emails', options: {persistent: true}});
-  User.embedsMany(PhoneNumber, {as: 'phones', options: {persistent: true}});
-
-  User.base.clearObservers('before delete');
-  User.base.clearObservers('access');
-  User.base.clearObservers('before save');
-  User.base.clearObservers('after save');
+  User.embedsMany(PhoneNumber, {as: 'phones', options: {persistent: true, validate: false}});
 
   User.setCaseSensitiveEmail = function(value) {
-    User.settings.caseSensitiveEmail = value;
-    EmailAddress.settings.caseSensitiveEmail = value;
+    this.settings.caseSensitiveEmail = value;
+    this.relations.emails.modelTo.settings.caseSensitiveEmail = value;
   };
 
   User.setVerificationRequired = function(value) {
-    User.settings.emailVerificationRequired = value;
-    EmailAddress.settings.verificationRequired = value;
-    PhoneNumber.settings.verificationRequired = value;
+    this.settings.emailVerificationRequired = value;
+    this.relations.emails.modelTo.settings.verificationRequired = value;
+    this.relations.phones.modelTo.settings.verificationRequired = value;
   };
 
   function splitPrincipal(name, realmDelimiter) {
@@ -557,6 +538,99 @@ module.exports = function(User) {
     return cb.promise;
   };
 
+  User.validateUniqueness = function(value, type, isNewRecord, realm, done) {
+    var UserModel = this;
+
+    if (blank(value)) {
+      return process.nextTick(done);
+    }
+
+    var cond = {where: {}};
+
+    if (type === 'email') {
+      if (!User.settings.caseSensitiveEmail) {
+        cond.where['emailAddresses.email'] = value.toLowerCase();
+      } else {
+        cond.where['emailAddresses.email'] = value;
+      }
+    } else if (type === 'phone') {
+      cond.where['phoneNumbers.phone'] = value;
+    }
+
+    if (UserModel.settings.realmRequired && UserModel.settings.realmDelimiter) {
+      if (realm !== undefined)
+        cond.where['realm'] = realm;
+    }
+
+    User.find(cond, function(error, found) {
+      if (error) {
+        done(error);
+      } else if (found.length > 1) {
+        done(generateError());
+      } else if (found.length === 1 && isNewRecord) {
+        done(generateError());
+      } else if (found.length === 1 && (
+        !this.id || !found[0].id || found[0].id.toString() != this.id.toString()
+      )) {
+        done(generateError());
+      } else {
+        done(null);
+      }
+    }.bind(this));
+
+    function generateError() {
+      if (type === 'email') {
+        var err = new Error(g.f('Email already exists'));
+      } else {
+        var err = new Error(g.f('Phone already exists'));
+      }
+
+      err.name = 'ValidationError';
+      err.statusCode = 422;
+      err.details = {
+        context: UserModel.modelName,
+        codes: {
+          email: ['custom.email'],
+        },
+      };
+
+      return err;
+    }
+  };
+
+  User.setupMixin = function() {
+    this.defineProperty('email', {type: String, required: false});
+    this.defineProperty('phone', {type: String, required: false});
+
+    if (this.settings.hidden.indexOf('email') === -1) {
+      this.settings.hidden.push('email');
+    }
+    if (this.settings.hidden.indexOf('phone') === -1) {
+      this.settings.hidden.push('phone');
+    }
+
+    this.settings.realmRequired = this.settings.realmRequired || null;
+    this.settings.realmDelimiter = this.settings.realmDelimiter || null;
+
+    this.base.clearObservers('before delete');
+    this.base.clearObservers('access');
+    this.base.clearObservers('before save');
+    this.base.clearObservers('after save');
+
+    this.relations.emails.modelTo.settings.verificationRequired =
+      this.settings.emailVerificationRequired;
+    this.relations.emails.modelTo.settings.caseSensitiveEmail =
+      this.settings.caseSensitiveEmail;
+
+    this.relations.phones.modelTo.settings.verificationRequired =
+      this.settings.emailVerificationRequired;
+  };
+
+  /*!
+   * Setup the base user.
+   */
+  User.setupMixin();
+
   if (!User.helpers) User.helpers = {};
 
   // --- OPERATION HOOKS ---
@@ -618,15 +692,36 @@ module.exports = function(User) {
       }
     }
 
-    if (ctx.instance.email) {
-      ctx.hookState.email = ctx.instance.email;
-      ctx.instance.unsetAttribute('email');
+    if (ctx.instance.email || ctx.instance.phone) {
+      var realm = ctx.instance.realm;
+
+      async.parallel([
+        function(callback) {
+          if (!ctx.instance.email) return callback();
+
+          User.validateUniqueness(ctx.instance.email, 'email', ctx.isNewInstance, realm,
+          function(err) {
+            ctx.hookState.email = ctx.instance.email;
+            ctx.instance.unsetAttribute('email');
+
+            callback(err);
+          });
+        },
+        function(callback) {
+          if (!ctx.instance.phone) return callback();
+
+          User.validateUniqueness(ctx.instance.phone, 'phone', ctx.isNewInstance, realm,
+          function(err) {
+            ctx.hookState.phone = ctx.instance.phone;
+            ctx.instance.unsetAttribute('phone');
+
+            callback(err);
+          });
+        },
+      ], next);
+    } else {
+      next();
     }
-    if (ctx.instance.phone) {
-      ctx.hookState.phone = ctx.instance.phone;
-      ctx.instance.unsetAttribute('phone');
-    }
-    next();
   };
 
   User.helpers.afterCreateEmbeded = function(ctx, next) {
@@ -740,7 +835,15 @@ module.exports = function(User) {
     if (body && body.verified) {
       body.verified = false;
     }
-    next();
+
+    var realm;
+    if (ctx.instance) {
+      realm = ctx.instance.realm;
+    }
+
+    User.validateUniqueness(body.email, 'email', true, realm, function(err) {
+      next(err);
+    });
   });
 
   User.beforeRemote('prototype.__create__phones', function(ctx, user, next) {
@@ -748,9 +851,26 @@ module.exports = function(User) {
     if (body && body.verified) {
       body.verified = false;
     }
-    next();
+
+    var realm;
+    if (ctx.instance) {
+      realm = ctx.instance.realm;
+    }
+
+    User.validateUniqueness(body.phone, 'phone', true, realm, function(err) {
+      next(err);
+    });
   });
 };
+
+function blank(v) {
+  if (typeof v === 'undefined') return true;
+  if (v instanceof Array && v.length === 0) return true;
+  if (v === null) return true;
+  if (typeof v === 'number' && isNaN(v)) return true;
+  if (typeof v == 'string' && v === '') return true;
+  return false;
+}
 
 function joinUrlPath(args) {
   var result = arguments[0];

@@ -173,7 +173,7 @@ describe('User with emails', function() {
       });
     });
 
-    xit('Requires a unique email', function(done) {
+    it('Requires a unique email', function(done) {
       User.create({email: 'a@b.com', password: 'foobar'}, function() {
         User.create({email: 'a@b.com', password: 'batbaz'}, function(err) {
           assert(err, 'should error because the email is not unique!');
@@ -183,7 +183,7 @@ describe('User with emails', function() {
       });
     });
 
-    xit('Requires a unique email (email case-sensitivity off)', function(done) {
+    it('Requires a unique email (email case-sensitivity off)', function(done) {
       User.setCaseSensitiveEmail(false);
       User.create({email: 'A@b.com', password: 'foobar'}, function(err) {
         if (err) return done(err);
@@ -196,12 +196,12 @@ describe('User with emails', function() {
       });
     });
 
-    xit('Requires a unique email (email case-sensitive)', function(done) {
+    it('Requires a unique email (email case-sensitive)', function(done) {
       User.create({email: 'A@b.com', password: 'foobar'}, function(err, user1) {
         User.create({email: 'a@b.com', password: 'batbaz'}, function(err, user2) {
           if (err) return done(err);
 
-          assert.notEqual(user1.email, user2.email);
+          assert.notEqual(user1.emailAddresses[0].email, user2.emailAddresses[0].email);
 
           done();
         });
@@ -983,6 +983,11 @@ describe('User with emails', function() {
       AccessToken.belongsTo(User, {as: 'user', foreignKey: 'userId'});
       User.hasMany(AccessToken, {as: 'accessTokens', foreignKey: 'userId'});
 
+      /**
+       * Setup Mixin
+       */
+      MultiEmailsAndPhones(User, true);
+
       // allow many User.afterRemote's to be called
       User.setMaxListeners(0);
     });
@@ -1047,11 +1052,10 @@ describe('User with emails', function() {
       });
     });
 
-    xit('honors unique email for realm', function(done) {
+    it('honors unique email for realm', function(done) {
       User.create(realm1User, function(err, u) {
         assert(err);
-        assert(err.message.match(/User already exists/) &&
-          err.message.match(/Email already exists/));
+        assert(err.message.match(/Email already exists/));
         done();
       });
     });
@@ -1262,7 +1266,7 @@ describe('User with emails', function() {
               updatedUser.hasPassword('baz2', function(err, isMatch) {
                 assert(isMatch);
                 User.findById(user.id, function(err, uu) {
-                  uu.hasPassword('baz', function(err, isMatch) {
+                  uu.hasPassword('baz2', function(err, isMatch) {
                     assert(isMatch);
 
                     done();
