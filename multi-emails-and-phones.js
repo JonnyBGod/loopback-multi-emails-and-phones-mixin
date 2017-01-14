@@ -147,6 +147,12 @@ module.exports = function(User) {
           return val.replace('user.', '');
         });
       }
+
+      include = include.map(function(val) {
+        return val.toLowerCase();
+      });
+    } else {
+      include = include.toLowerCase();
     }
 
     // Check if realm is required
