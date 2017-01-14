@@ -123,6 +123,8 @@ module.exports = function(User) {
 
   User.login = function(credentials, include, fn) {
     var self = this;
+    var includeRelations, realmDelimiter;
+
     if (typeof include === 'function') {
       fn = include;
       include = undefined;
@@ -135,11 +137,24 @@ module.exports = function(User) {
       include = include.map(function(val) {
         return val.toLowerCase();
       });
+
+      includeRelations = include.filter(function(val) {
+        return val.indexOf('user.') !== -1;
+      });
+
+      if (includeRelations && includeRelations.length) {
+        include = include.filter(function(val) {
+          return val.indexOf('user.') === -1;
+        });
+
+        includeRelations = includeRelations.map(function(val) {
+          return val.replace('user.', '');
+        });
+      }
     } else {
       include = include.toLowerCase();
     }
 
-    var realmDelimiter;
     // Check if realm is required
     var realmRequired = !!(self.settings.realmRequired ||
       self.settings.realmDelimiter);
@@ -172,7 +187,7 @@ module.exports = function(User) {
       delete query.phone;
     }
 
-    self.findOne({where: query}, function(err, user) {
+    self.findOne({where: query, include: includeRelations}, function(err, user) {
       var defaultError = new Error(g.f('login failed'));
       defaultError.statusCode = 401;
       defaultError.code = 'LOGIN_FAILED';
