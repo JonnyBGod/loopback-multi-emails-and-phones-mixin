@@ -134,10 +134,6 @@ module.exports = function(User) {
 
     include = (include || '');
     if (Array.isArray(include)) {
-      include = include.map(function(val) {
-        return val.toLowerCase();
-      });
-
       includeRelations = include.filter(function(val) {
         return val.indexOf('user.') !== -1;
       });
@@ -151,8 +147,6 @@ module.exports = function(User) {
           return val.replace('user.', '');
         });
       }
-    } else {
-      include = include.toLowerCase();
     }
 
     // Check if realm is required
