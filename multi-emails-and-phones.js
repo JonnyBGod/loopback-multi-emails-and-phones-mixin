@@ -188,9 +188,13 @@ module.exports = function(User) {
     }
 
     self.findOne({where: query, include: includeRelations}, function(err, user) {
-      var defaultError = new Error(g.f('login failed'));
-      defaultError.statusCode = 401;
-      defaultError.code = 'LOGIN_FAILED';
+      function defaultError() {
+        var defError = new Error(g.f('login failed'));
+        defError.statusCode = 401;
+        defError.code = 'LOGIN_FAILED';
+
+        return defError;
+      }
 
       function tokenHandler(err, token) {
         if (err) return fn(err);
@@ -208,12 +212,12 @@ module.exports = function(User) {
 
       if (err) {
         debug('An error is reported from User.findOne: %j', err);
-        fn(defaultError);
+        fn(defaultError());
       } else if (user) {
         user.hasPassword(credentials.password, function(err, isMatch) {
           if (err) {
             debug('An error is reported from User.hasPassword: %j', err);
-            fn(defaultError);
+            fn(defaultError());
           } else if (isMatch) {
             if (self.settings.emailVerificationRequired && query['emailAddresses.email'] &&
               !user.emailAddresses.filter(function(e) {
@@ -244,12 +248,12 @@ module.exports = function(User) {
             }
           } else {
             debug('The password is invalid for user %s', query.email || query.username);
-            fn(defaultError);
+            fn(defaultError());
           }
         });
       } else {
         debug('No matching record is found for user %s', query.email || query.username);
-        fn(defaultError);
+        fn(defaultError());
       }
     });
 
