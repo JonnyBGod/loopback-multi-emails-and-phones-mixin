@@ -671,9 +671,13 @@ module.exports = function(User) {
       if (ctx.query.where.or) {
         for (var i = ctx.query.where.or.length - 1; i >= 0; i--) {
           if (ctx.query.where.or[i].email) {
-            ctx.query.where.or.splice(i, 1, {'emailAddresses.email': ctx.query.where.or[i].email});
+            ctx.query.where.or.splice(i, 1, {
+              'emailAddresses.email': ctx.query.where.or[i].email,
+            });
           } else if (ctx.query.where.or[i].phone) {
-            ctx.query.where.or.splice(i, 1, {'phoneNumbers.phone': ctx.query.where.or[i].phone});
+            ctx.query.where.or.splice(i, 1, {
+              'phoneNumbers.phone': ctx.query.where.or[i].phone,
+            });
           }
         }
       }
@@ -681,9 +685,13 @@ module.exports = function(User) {
       if (ctx.query.where.and) {
         for (var i = ctx.query.where.and.length - 1; i >= 0; i--) {
           if (ctx.query.where.and[i].email) {
-            ctx.query.where.and.splice(i, 1, {'emailAddresses.email': ctx.query.where.and[i].email});
+            ctx.query.where.and.splice(i, 1, {
+              'emailAddresses.email': ctx.query.where.and[i].email,
+            });
           } else if (ctx.query.where.and[i].phone) {
-            ctx.query.where.and.splice(i, 1, {'phoneNumbers.phone': ctx.query.where.and[i].phone});
+            ctx.query.where.and.splice(i, 1, {
+              'phoneNumbers.phone': ctx.query.where.and[i].phone,
+            });
           }
         }
       }
