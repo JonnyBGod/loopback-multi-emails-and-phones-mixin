@@ -54,6 +54,14 @@
     "dataSource": "db",
     "public": false
   },
+  "EmailAddress": {
+    "public": false,
+    "dataSource": "db"
+  },
+  "PhoneNumber": {
+    "public": false,
+    "dataSource": "db"
+  },
   "myUser": {
     "dataSource": "db",
     "public": true

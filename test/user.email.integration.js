@@ -53,7 +53,6 @@ describe('users with emails - integration', function() {
         .send({email: 'x@y.com', password: 'x'})
         .expect(200, function(err, res) {
           if (err) return done(err);
-
           expect(res.body.id).to.exist();
           accessToken = res.body.id;
 
@@ -154,6 +153,30 @@ describe('users with emails - integration', function() {
           var blog = res.body[0];
           expect(blog.user).to.not.have.property('accessTokens');
 
+          done();
+        });
+    });
+
+    it('should get user', function(done) {
+      var url = '/api/myUsers/' + userId + '?access_token=' + accessToken;
+      this.get(url)
+        .expect(200, function(err, res) {
+          if (err) return done(err);
+
+          expect(res.body.id).to.be.eql(1);
+          expect(res.body.emailAddresses[0]).to.have.property('id', 1);
+
+          done();
+        });
+    });
+
+    it('should set primary email for a given user with email', function(done) {
+      var url = '/api/myUsers/' + userId + '/setPrimaryEmail/1?access_token=' + accessToken;
+      this.put(url)
+        .expect(200, function(err, res) {
+          if (err) return done(err);
+
+          console.log(err, res);
           done();
         });
     });

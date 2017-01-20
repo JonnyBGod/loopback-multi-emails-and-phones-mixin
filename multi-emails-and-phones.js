@@ -617,6 +617,55 @@ module.exports = function(User) {
     }
   };
 
+  User.prototype.setPrimaryEmail = function(fk, fn) {
+    fn = fn || utils.createPromiseCallback();
+
+    var emailIds = this.emailAddresses.map(function(address) { return address.id; });
+
+    User.relations.emails.modelTo.updateAll({
+      id: {
+        inq: emailIds,
+      },
+    }, {
+      primary: false,
+    }, function(err, info) {
+      console.log('err, info', err, info);
+      if (err) return fn(err);
+
+      User.relations.emails.modelTo.updateAll({
+        id: fk,
+      }, {
+        primary: true,
+      }, fn);
+    });
+
+    return fn.promise;
+  };
+
+  User.prototype.setPrimaryPhone = function(fk, fn) {
+    fn = fn || utils.createPromiseCallback();
+
+    var phoneIds = this.phoneNumbers.map(function(number) { return number.id; });
+
+    User.relations.phones.modelTo.updateAll({
+      id: {
+        inq: phoneIds,
+      },
+    }, {
+      primary: false,
+    }, function(err, info) {
+      if (err) return fn(err);
+
+      User.relations.phones.modelTo.updateAll({
+        id: fk,
+      }, {
+        primary: true,
+      }, fn);
+    });
+
+    return fn.promise;
+  };
+
   User.setupMixin = function() {
     this.defineProperty('email', {type: String, required: false});
     this.defineProperty('phone', {type: String, required: false});
@@ -643,6 +692,36 @@ module.exports = function(User) {
 
     this.relations.phones.modelTo.settings.verificationRequired =
       this.settings.emailVerificationRequired;
+
+    this.remoteMethod('setPrimaryEmail', {
+      isStatic: false,
+      description: 'Set the primary email address',
+      accessType: 'WRITE',
+      accepts: [
+        {
+          arg: 'fk', type: 'any',
+          description: 'Foreign key for emailAddress',
+          required: true,
+          http: {source: 'path'},
+        },
+      ],
+      http: {verb: 'put', path: '/setPrimaryEmail/:fk'},
+    });
+
+    this.remoteMethod('setPrimaryPhone', {
+      isStatic: false,
+      description: 'Set the primary phone number',
+      accessType: 'WRITE',
+      accepts: [
+        {
+          arg: 'fk', type: 'any',
+          description: 'Foreign key for phoneNumber',
+          required: true,
+          http: {source: 'path'},
+        },
+      ],
+      http: {verb: 'put', path: '/setPrimaryPhone/:fk'},
+    });
   };
 
   /*!

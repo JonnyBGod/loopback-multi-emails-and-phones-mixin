@@ -12,16 +12,16 @@
   },
   "devDependencies": {
     "chai": "^3.5.0",
-    "commitizen": "^2.8.6",
+    "commitizen": "^2.9.5",
     "cz-conventional-changelog": "^1.2.0",
     "dirty-chai": "^1.2.2",
-    "eslint": "^3.11.1",
+    "eslint": "^3.13.1",
     "eslint-config-loopback": "^5.0.0",
-    "loopback": "^3.0.0",
+    "loopback": "^3.2.1",
     "loopback-boot": "^2.23.0",
     "mocha": "^3.2.0",
-    "semantic-release": "^6.3.2",
-    "sinon": "^1.17.6",
+    "semantic-release": "^6.3.6",
+    "sinon": "^1.17.7",
     "sinon-chai": "^2.8.0",
     "strong-error-handler": "^1.1.1",
     "supertest": "^2.0.1"
@@ -50,7 +50,7 @@
   "dependencies": {
     "async": "^2.1.4",
     "bcryptjs": "^2.4.0",
-    "debug": "^2.5.1",
+    "debug": "^2.6.0",
     "isemail": "^1.2.0",
     "strong-globalize": "^2.8.0"
   }
