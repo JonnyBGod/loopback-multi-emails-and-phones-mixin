@@ -629,7 +629,6 @@ module.exports = function(User) {
     }, {
       primary: false,
     }, function(err, info) {
-      console.log('err, info', err, info);
       if (err) return fn(err);
 
       User.relations.emails.modelTo.updateAll({

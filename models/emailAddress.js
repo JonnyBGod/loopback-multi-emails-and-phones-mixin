@@ -285,7 +285,6 @@ module.exports = function(EmailAddress) {
   EmailAddress.observe('before save', function(ctx, next) {
     if (ctx.isNewInstance) {
       ctx.instance.masked = ctx.instance.email;
-      next();
     } else {
       var isPartialUpdateChangingEmail = ctx.data && 'email' in ctx.data;
       var isFullReplaceChangingEmail = !!ctx.instance;
@@ -301,9 +300,9 @@ module.exports = function(EmailAddress) {
             ctx.data.verified = false;
           }
         }
-        next();
       }
     }
+    next();
   });
 };
 

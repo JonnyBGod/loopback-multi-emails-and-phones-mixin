@@ -272,7 +272,6 @@ module.exports = function(PhoneNumber) {
   PhoneNumber.observe('before save', function(ctx, next) {
     if (ctx.isNewInstance) {
       ctx.instance.masked = ctx.instance.phone;
-      next();
     } else {
       var isPartialUpdateChangingPhone = ctx.data && 'phone' in ctx.data;
       var isFullReplaceChangingPhone = !!ctx.instance;
@@ -288,9 +287,9 @@ module.exports = function(PhoneNumber) {
             ctx.data.verified = false;
           }
         }
-        next();
       }
     }
+    next();
   });
 };
 

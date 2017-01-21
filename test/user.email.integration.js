@@ -173,11 +173,8 @@ describe('users with emails - integration', function() {
     it('should set primary email for a given user with email', function(done) {
       var url = '/api/myUsers/' + userId + '/setPrimaryEmail/1?access_token=' + accessToken;
       this.put(url)
-        .expect(200, function(err, res) {
-          if (err) return done(err);
-
-          console.log(err, res);
-          done();
+        .expect(204, function(err, res) {
+          done(err);
         });
     });
   });
