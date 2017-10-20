@@ -228,6 +228,9 @@ module.exports = function(User) {
               err = new Error(g.f('login failed as the email has not been verified'));
               err.statusCode = 401;
               err.code = 'LOGIN_FAILED_EMAIL_NOT_VERIFIED';
+              err.details = {
+                userId: user.id,
+              };
               fn(err);
             } else if (self.settings.emailVerificationRequired && query['phoneNumbers.phone'] &&
               !user.phoneNumbers.filter(function(e) {
@@ -238,6 +241,9 @@ module.exports = function(User) {
               err = new Error(g.f('login failed as the phone has not been verified'));
               err.statusCode = 401;
               err.code = 'LOGIN_FAILED_PHONE_NOT_VERIFIED';
+              err.details = {
+                userId: user.id,
+              };
               fn(err);
             } else {
               if (user.createAccessToken.length === 2) {
@@ -532,7 +538,21 @@ module.exports = function(User) {
         return cb(err);
       }
 
-      user.createAccessToken(ttl, function(err, accessToken) {
+      if (UserModel.settings.restrictResetPasswordTokenScope) {
+        const tokenData = {
+          ttl: ttl,
+          scopes: ['reset-password'],
+        };
+        user.createAccessToken(tokenData, options, onTokenCreated);
+      } else {
+        // We need to preserve backwards-compatibility with
+        // user-supplied implementations of "createAccessToken"
+        // that may not support "options" argument (we have such
+        // examples in our test suite).
+        user.createAccessToken(ttl, onTokenCreated);
+      }
+
+      function onTokenCreated(err, accessToken) {
         if (err) {
           return cb(err);
         }
@@ -551,7 +571,7 @@ module.exports = function(User) {
             user: user,
           });
         }
-      });
+      }
     });
 
     return cb.promise;
@@ -598,10 +618,11 @@ module.exports = function(User) {
     }.bind(this));
 
     function generateError() {
+      var err;
       if (type === 'email') {
-        var err = new Error(g.f('Email already exists'));
+        err = new Error(g.f('Email already exists'));
       } else {
-        var err = new Error(g.f('Phone already exists'));
+        err = new Error(g.f('Phone already exists'));
       }
 
       err.name = 'ValidationError';
@@ -679,10 +700,19 @@ module.exports = function(User) {
     this.settings.realmRequired = this.settings.realmRequired || null;
     this.settings.realmDelimiter = this.settings.realmDelimiter || null;
 
-    this.base.clearObservers('before delete');
-    this.base.clearObservers('access');
-    this.base.clearObservers('before save');
-    this.base.clearObservers('after save');
+    if (this.settings.base === 'User') {
+      this.base.clearObservers('before delete');
+      this.base.clearObservers('access');
+      this.base.clearObservers('before save');
+      this.base.clearObservers('after save');
+    } else if (this.base.settings.base === 'User') {
+      this.base.base.clearObservers('before delete');
+      this.base.base.clearObservers('access');
+      this.base.base.clearObservers('before save');
+      this.base.base.clearObservers('after save');
+    } else {
+      throw new Error('Multi emails and phones mixin: did not found User base model!');
+    }
 
     this.relations.emails.modelTo.settings.verificationRequired =
       this.settings.emailVerificationRequired;
@@ -747,7 +777,7 @@ module.exports = function(User) {
       }
 
       if (ctx.query.where.or) {
-        for (var i = ctx.query.where.or.length - 1; i >= 0; i--) {
+        for (let i = ctx.query.where.or.length - 1; i >= 0; i--) {
           if (ctx.query.where.or[i].email) {
             ctx.query.where.or.splice(i, 1, {
               'emailAddresses.email': ctx.query.where.or[i].email,
@@ -761,7 +791,7 @@ module.exports = function(User) {
       }
 
       if (ctx.query.where.and) {
-        for (var i = ctx.query.where.and.length - 1; i >= 0; i--) {
+        for (let i = ctx.query.where.and.length - 1; i >= 0; i--) {
           if (ctx.query.where.and[i].email) {
             ctx.query.where.and.splice(i, 1, {
               'emailAddresses.email': ctx.query.where.and[i].email,
@@ -788,12 +818,53 @@ module.exports = function(User) {
     next();
   };
 
+  User.observe('before save', function rejectInsecurePasswordChange(ctx, next) {
+    const UserModel = ctx.Model;
+    if (!UserModel.settings.rejectPasswordChangesViaPatchOrReplace) {
+      // In legacy password flow, any DAO method can change the password
+      return next();
+    }
+
+    if (ctx.isNewInstance) {
+      // The password can be always set when creating a new User instance
+      return next();
+    }
+    const data = ctx.data || ctx.instance;
+    const isPasswordChange = 'password' in data;
+
+    // This is the option set by `setPassword()` API
+    // when calling `this.patchAttritubes()` to change user's password
+    if (ctx.options.setPassword) {
+      // Verify that only the password is changed and nothing more or less.
+      if (Object.keys(data).length > 1 || !isPasswordChange) {
+        // This is a programmer's error, use the default status code 500
+        return next(new Error(
+          'Invalid use of "options.setPassword". Only "password" can be ' +
+          'changed when using this option.'));
+      }
+
+      return next();
+    }
+
+    if (!isPasswordChange) {
+      return next();
+    }
+
+    const err = new Error(
+      'Changing user password via patch/replace API is not allowed. ' +
+      'Use changePassword() or setPassword() instead.');
+    err.statusCode = 401;
+    err.code = 'PASSWORD_CHANGE_NOT_ALLOWED';
+    next(err);
+  });
+
   User.helpers.beforeCreateEmbeded = function(ctx, next) {
     if (!ctx.isNewInstance || !ctx.instance) return next();
 
     if (ctx.isNewInstance) {
+      var err;
       if (!ctx.instance.email) {
-        var err = new Error(g.f('Must provide a valid email'));
+        err = new Error(g.f('Must provide a valid email'));
         err.name = 'ValidationError';
         err.statusCode = 422;
         err.details = {
@@ -803,8 +874,8 @@ module.exports = function(User) {
           },
         };
         return next(err);
-      } else if (!isEmail(ctx.instance.email)) {
-        var err = new Error(g.f('Must provide a valid email'));
+      } else if (!isEmail.validate(ctx.instance.email)) {
+        err = new Error(g.f('Must provide a valid email'));
         err.name = 'ValidationError';
         err.statusCode = 422;
         err.details = {
@@ -825,23 +896,23 @@ module.exports = function(User) {
           if (!ctx.instance.email) return callback();
 
           User.validateUniqueness(ctx.instance.email, 'email', ctx.isNewInstance, realm,
-          function(err) {
-            ctx.hookState.email = ctx.instance.email;
-            ctx.instance.unsetAttribute('email');
+            function(err) {
+              ctx.hookState.email = ctx.instance.email;
+              ctx.instance.unsetAttribute('email');
 
-            callback(err);
-          });
+              callback(err);
+            });
         },
         function(callback) {
           if (!ctx.instance.phone) return callback();
 
           User.validateUniqueness(ctx.instance.phone, 'phone', ctx.isNewInstance, realm,
-          function(err) {
-            ctx.hookState.phone = ctx.instance.phone;
-            ctx.instance.unsetAttribute('phone');
+            function(err) {
+              ctx.hookState.phone = ctx.instance.phone;
+              ctx.instance.unsetAttribute('phone');
 
-            callback(err);
-          });
+              callback(err);
+            });
         },
       ], next);
     } else {
@@ -940,6 +1011,7 @@ module.exports = function(User) {
     }).map(function(u) {
       return u.id;
     });
+    console.log(userIdsToExpire);
     ctx.Model._invalidateAccessTokensOfUsers(userIdsToExpire, next);
   };
 

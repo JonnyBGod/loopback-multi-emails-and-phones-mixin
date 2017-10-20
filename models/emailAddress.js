@@ -313,7 +313,7 @@ function emailValidator(err) {
   if (typeof value !== 'string')
     return err('string');
   if (value === '') return;
-  if (!isEmail(value))
+  if (!isEmail.validate(value))
     return err('email');
 }
 
