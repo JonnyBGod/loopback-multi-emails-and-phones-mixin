@@ -62,12 +62,10 @@ To use with your Models add the mixins attribute to the definition object of you
 ## LIMITATIONS
 
  - Currently only working with memory and mongodb connectors. [Filter on level 2 properties](https://github.com/strongloop/loopback/issues/517)
- - Uniqueness Validation is turned of untill [Fix async validation of embedded models](https://github.com/strongloop/loopback-datasource-juggler/pull/900)
 
 ## TODO
 
-- Phone tests
-- Phone validation
+ - Fix pending tests
 
 ## License
 

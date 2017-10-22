@@ -1,6 +1,6 @@
 {
   "name": "PhoneNumber",
-  "base": "PersistedModel",
+  "base": "Model",
   "idInjection": true,
   "properties": {
     "phone": {
@@ -19,6 +19,9 @@
       "default": false
     },
     "verificationToken": {
+      "type": "string"
+    },
+    "country": {
       "type": "string"
     }
   },

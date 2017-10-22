@@ -1,166 +1,234 @@
 'use strict';
 var loopback = require('loopback/lib/loopback');
 var g = require('strong-globalize')();
-var crypto = require('crypto');
+var speakeasy = require('speakeasy');
 var utils = require('loopback/lib/utils');
 var assert = require('assert');
 var path = require('path');
+var qs = require('querystring');
+var phone = require('phone');
 
 var debug = require('debug')('core:phoneNumber');
 
 module.exports = function(PhoneNumber) {
   /**
-   * Verify a phoneNumber's identity by sending them a confirmation phone.
+   * Verify a user's identity by sending them a confirmation message.
+   * NOTE: Currently only phone verification is supported
    *
    * ```js
-   *    var options = {
-   *      to: phoneNumber.phone,
-   *      template: 'verify.ejs',
-   *      redirect: '/',
-   *      tokenGenerator: function (phoneNumber, cb) { cb("random-token"); }
-   *    };
+   * var verifyOptions = {
+   *   type: 'phone',
+   *   from: 'noreply@example.com'
+   *   template: 'verify.ejs',
+   *   redirect: '/',
+   *   generateVerificationToken: function (user, options, cb) {
+   *     cb('random-token');
+   *   }
+   * };
    *
-   *    phoneNumber.verify(options, next);
+   * user.verify(verifyOptions);
    * ```
    *
-   * @options {Object} options
-   * @property {String} type Must be 'phone' or 'phone'.
-   * @property {String} to Phone number to which verification phone is sent.
-   * @property {String} from Sender phone numbers, for example
-   *   `'noreply@myapp.com'`.
+   * NOTE: the User.getVerifyOptions() method can also be used to ease the
+   * building of identity verification options.
+   *
+   * ```js
+   * var verifyOptions = MyUser.getVerifyOptions();
+   * user.verify(verifyOptions);
+   * ```
+   *
+   * @options {Object} verifyOptions
+   * @property {String} type Must be `'phone'` in the current implementation.
+   * @property {Function} phoner A phoner function with a static `.send() method.
+   *  The `.send()` method must accept the verifyOptions object, the method's
+   *  remoting context options object and a callback function with `(err, phone)`
+   *  as parameters.
+   *  Defaults to provided `userModel.phone` function, or ultimately to LoopBack's
+   *  own phoner function.
+   * @property {String} to Email address to which verification phone is sent.
+   *  Defaults to user's phone. Can also be overriden to a static value for test
+   *  purposes.
+   * @property {String} from Sender phone address
+   *  For example `'noreply@example.com'`.
    * @property {String} subject Subject line text.
+   *  Defaults to `'Thanks for Registering'` or a local equivalent.
    * @property {String} text Text of phone.
-   * @property {String} template Name of template that displays verification
-   *  page, for example, `'verify.ejs'.
+   *  Defaults to `'Please verify your phone by opening this link in a web browser:`
+   *  followed by the verify link.
+   * @property {Object} headers Email headers. None provided by default.
+   * @property {String} template Relative path of template that displays verification
+   *  page. Defaults to `'../../templates/verify.ejs'`.
    * @property {Function} templateFn A function generating the phone HTML body
-   * from `verify()` options object and generated attributes like `options.verifyHref`.
-   * It must accept the option object and a callback function with `(err, html)`
-   * as parameters
-   * @property {String} redirect Page to which phoneNumber will be redirected after
-   *  they verify their phone, for example `'/'` for root URI.
+   *  from `verify()` options object and generated attributes like `options.redirect`.
+   *  It must accept the verifyOptions object, the method's remoting context options
+   *  object and a callback function with `(err, html)` as parameters.
+   *  A default templateFn function is provided, see `createVerificationEmailBody()`
+   *  for implementation details.
+   * @property {String} redirect Page to which user will be redirected after
+   *  they verify their phone. Defaults to `'/'`.
+   *  `http://host:port/restApiRoot/userRestPath/confirm?uid=userId&redirect=/``
+   * @property {String} host The API host. Defaults to app's host or `localhost`.
+   * @property {String} protocol The API protocol. Defaults to `'http'`.
+   * @property {Number} port The API port. Defaults to app's port or `3000`.
+   * @property {String} restApiRoot The API root path. Defaults to app's restApiRoot
+   *  or `'/api'`
    * @property {Function} generateVerificationToken A function to be used to
-   *  generate the verification token. It must accept the phoneNumber object and a
-   *  callback function. This function should NOT add the token to the phoneNumber
-   *  object, instead simply execute the callback with the token! PhoneNumber saving
-   *  and phone sending will be handled in the `verify()` method.
-   * @callback {Function} fn Callback function.
+   *  generate the verification token.
+   *  It must accept the verifyOptions object, the method's remoting context options
+   *  object and a callback function with `(err, hexStringBuffer)` as parameters.
+   *  This function should NOT add the token to the user object, instead simply
+   *  execute the callback with the token! User saving and phone sending will be
+   *  handled in the `verify()` method.
+   *  A default token generation function is provided, see `generateVerificationToken()`
+   *  for implementation details.
+   * @callback {Function} cb Callback function.
+   * @param {Object} options remote context options.
    * @param {Error} err Error object.
    * @param {Object} object Contains phone, token, uid.
    * @promise
    */
-  PhoneNumber.prototype.verify = function(options, fn) {
-    fn = fn || utils.createPromiseCallback();
+
+  PhoneNumber.prototype.verify = function(user, verifyOptions, options, cb) {
+    if (cb === undefined && typeof options === 'function') {
+      cb = options;
+      options = undefined;
+    }
+    cb = cb || utils.createPromiseCallback();
 
     var phoneNumber = this;
     var phoneNumberModel = this.constructor;
+    var userModel = user.constructor;
     var registry = phoneNumberModel.registry;
-    assert(typeof options === 'object', 'options required when calling phoneNumber.verify()');
-    assert(options.to || this.phone,
-      'Must include options.to when calling phoneNumber.verify() ' +
-      'or the phoneNumber must have an phone property');
-    assert(options.from, 'Must include options.from when calling phoneNumber.verify()');
+    verifyOptions = Object.assign({}, verifyOptions);
+    // final assertion is performed once all options are assigned
+    assert(typeof verifyOptions === 'object',
+      'verifyOptions object param required when calling phoneNumber.verify()');
 
-    options.redirect = options.redirect || '/';
+    // Shallow-clone the options object so that we don't override
+    // the global default options object
+    verifyOptions = Object.assign({}, verifyOptions);
+
+    // Set a default template generation function if none provided
+    verifyOptions.templateFn = verifyOptions.templateFn || createVerificationEmailBody;
+
+    // Set a default token generation function if none provided
+    verifyOptions.generateVerificationToken = verifyOptions.generateVerificationToken ||
+      PhoneNumber.generateVerificationToken;
+
+    // Set a default phoner function if none provided
+    verifyOptions.phoner = verifyOptions.phoner || userModel.phone ||
+      registry.getModelByType(loopback.Email);
+
+    var pkName = phoneNumberModel.definition.idName() || 'id';
+    verifyOptions.redirect = verifyOptions.redirect || '/';
     var defaultTemplate = path.join(__dirname, '..', 'templates', 'verifyPhone.ejs');
-    options.template = path.resolve(options.template || defaultTemplate);
-    options.phoneNumber = this;
-    options.protocol = options.protocol || 'http';
+    verifyOptions.template = path.resolve(verifyOptions.template || defaultTemplate);
+    verifyOptions.phoneNumber = phoneNumber;
+    verifyOptions.protocol = verifyOptions.protocol || 'http';
 
     var app = phoneNumberModel.app;
-    options.host = options.host || (app && app.get('host')) || 'localhost';
-    options.port = options.port || (app && app.get('port')) || 3000;
-    options.restApiRoot = options.restApiRoot || (app && app.get('restApiRoot')) || '/api';
+    verifyOptions.host = verifyOptions.host || (app && app.get('host')) || 'localhost';
+    verifyOptions.port = verifyOptions.port || (app && app.get('port')) || 3000;
+    verifyOptions.restApiRoot = verifyOptions.restApiRoot || (app && app.get('restApiRoot')) || '/api';
 
     var displayPort = (
-      (options.protocol === 'http' && options.port == '80') ||
-      (options.protocol === 'https' && options.port == '443')
-    ) ? '' : ':' + options.port;
+      (verifyOptions.protocol === 'http' && verifyOptions.port == '80') ||
+      (verifyOptions.protocol === 'https' && verifyOptions.port == '443')
+    ) ? '' : ':' + verifyOptions.port;
 
-    var urlPath = options.urlPath || joinUrlPath(
-      options.restApiRoot,
+    var urlPath = joinUrlPath(
+      verifyOptions.restApiRoot,
       phoneNumberModel.http.path,
       phoneNumberModel.sharedClass.findMethodByName('confirm').http.path
     );
 
-    options.verifyHref = options.verifyHref ||
-      options.protocol +
-      '://' +
-      options.host +
-      displayPort +
-      urlPath +
-      '?eid=' +
-      phoneNumber.id +
-      '&redirect=' +
-      options.redirect;
+    verifyOptions.to = phoneNumber.phone;
+    verifyOptions.subject = verifyOptions.subject || g.f('Thanks for Registering');
+    verifyOptions.headers = verifyOptions.headers || {};
 
-    options.templateFn = options.templateFn || createVerificationPhoneBody;
+    // assert the verifyOptions params that might have been badly defined
+    assertVerifyOptions(verifyOptions);
 
-    // Phone model
-    var Phone =
-      options.mailer || this.constructor.phone || registry.getModelByType(loopback.Phone);
+    // argument "options" is passed depending on verifyOptions.generateVerificationToken function requirements
+    var tokenGenerator = verifyOptions.generateVerificationToken;
+    if (tokenGenerator.length == 3) {
+      tokenGenerator(phoneNumber, options, addTokenToUserAndSave);
+    } else {
+      tokenGenerator(phoneNumber, addTokenToUserAndSave);
+    }
 
-    // Set a default token generation function if one is not provided
-    var tokenGenerator = options.generateVerificationToken ||
-      PhoneNumber.generateVerificationToken;
-
-    tokenGenerator(phoneNumber, function(err, token) {
-      if (err) { return fn(err); }
-
-      phoneNumber.verificationToken = token;
-      phoneNumber.save(function(err) {
-        if (err) {
-          fn(err);
-        } else {
-          sendPhone(phoneNumber);
-        }
+    function addTokenToUserAndSave(err, secret) {
+      if (err) return cb(err);
+      var token = speakeasy.totp({
+        secret: secret,
+        encoding: 'base32',
+        step: 10 * 60,
       });
-    });
+      user.phones.updateById(phoneNumber.id, {
+        verificationToken: secret,
+      }, function(err, newPhoneNumber) {
+        if (err) return cb(err);
+        phoneNumber = newPhoneNumber;
+        sendPhone(token, phoneNumber);
+      });
+    }
 
     // TODO - support more verification types
-    function sendPhone(phoneNumber) {
-      options.verifyHref += '&token=' + phoneNumber.verificationToken;
+    function sendPhone(token, phoneNumber) {
+      verifyOptions.verificationToken = token;
 
-      options.text = options.text || g.f('Please verify your phone by opening ' +
-        'this link in a web browser:\n\t%s', options.verifyHref);
+      // argument "options" is passed depending on templateFn function requirements
+      var templateFn = verifyOptions.templateFn;
+      if (templateFn.length == 3) {
+        templateFn(verifyOptions, options, setContentAndSend);
+      } else {
+        templateFn(verifyOptions, setContentAndSend);
+      }
 
-      options.text = options.text.replace(/\{href\}/g, options.verifyHref);
+      function setContentAndSend(err, text) {
+        if (err) return cb(err);
 
-      options.to = options.to || phoneNumber.phone;
+        verifyOptions.text = text;
 
-      options.subject = options.subject || g.f('Thanks for Registering');
-
-      options.headers = options.headers || {};
-
-      options.templateFn(options, function(err, html) {
-        if (err) {
-          fn(err);
-        } else {
-          setHtmlContentAndSend(html);
-        }
-      });
-
-      function setHtmlContentAndSend(html) {
-        options.html = html;
-
-        // Remove options.template to prevent rejection by certain
+        // Remove verifyOptions.template to prevent rejection by certain
         // nodphoneer transport plugins.
-        delete options.template;
+        delete verifyOptions.template;
 
-        Phone.send(options, function(err, phone) {
-          if (err) {
-            fn(err);
-          } else {
-            fn(null, {phone: phone, token: phoneNumber.verificationToken, uid: phoneNumber.id});
-          }
-        });
+        // argument "options" is passed depending on Email.send function requirements
+        var Email = verifyOptions.phoner;
+        if (Email.send.length == 3) {
+          Email.send(verifyOptions, options, handleAfterSend);
+        } else {
+          Email.send(verifyOptions, handleAfterSend);
+        }
+
+        function handleAfterSend(err, phone) {
+          if (err) return cb(err);
+          cb(null, {phone: phone, token: token, uid: user[userModel.definition.idName() || 'id']});
+        }
       }
     }
-    return fn.promise;
+
+    return cb.promise;
   };
 
-  function createVerificationPhoneBody(options, cb) {
-    var template = loopback.template(options.template);
-    var body = template(options);
+  function assertVerifyOptions(verifyOptions) {
+    assert(verifyOptions.type, 'You must supply a verification type (verifyOptions.type)');
+    assert(verifyOptions.type === 'phone', 'Unsupported verification type');
+    assert(verifyOptions.to, 'Must include verifyOptions.to when calling phoneNumber.verify() ' +
+      'or the phoneNumber must have an phone property');
+    assert(verifyOptions.from, 'Must include verifyOptions.from when calling phoneNumber.verify()');
+    assert(typeof verifyOptions.templateFn === 'function',
+      'templateFn must be a function');
+    assert(typeof verifyOptions.generateVerificationToken === 'function',
+      'generateVerificationToken must be a function');
+    assert(verifyOptions.phoner, 'A phoner function must be provided');
+    assert(typeof verifyOptions.phoner.send === 'function', 'phoner.send must be a function ');
+  }
+
+  function createVerificationEmailBody(verifyOptions, options, cb) {
+    var template = loopback.template(verifyOptions.template);
+    var body = template(verifyOptions);
     cb(null, body);
   }
 
@@ -175,63 +243,20 @@ module.exports = function(PhoneNumber) {
    * @param {Function} cb The generator must pass back the new token with this function call
    */
   PhoneNumber.generateVerificationToken = function(phoneNumber, cb) {
-    crypto.randomBytes(64, function(err, buf) {
-      cb(err, buf && buf.toString('hex'));
-    });
-  };
-
-  /**
-   * Confirm the phoneNumbers' validity.
-   *
-   * @param {Any} pId
-   * @param {String} token The validation token
-   * @param {String} redirect URL to redirect the user to once confirmed
-   * @callback {Function} callback
-   * @param {Error} err
-   * @promise
-   */
-  PhoneNumber.confirm = function(pId, token, redirect, fn) {
-    fn = fn || utils.createPromiseCallback();
-    this.findById(pId, function(err, phone) {
-      if (err) {
-        fn(err);
-      } else {
-        if (phone && phone.verificationToken === token) {
-          phone.verificationToken = null;
-          phone.verified = true;
-          phone.save(function(err) {
-            if (err) {
-              fn(err);
-            } else {
-              fn();
-            }
-          });
-        } else {
-          if (phone) {
-            err = new Error(g.f('Invalid token: %s', token));
-            err.statusCode = 400;
-            err.code = 'INVALID_TOKEN';
-          } else {
-            err = new Error(g.f('PhoneNumber not found: %s', pId));
-            err.statusCode = 404;
-            err.code = 'PHONENUMBER_NOT_FOUND';
-          }
-          fn(err);
-        }
-      }
-    });
-    return fn.promise;
+    cb(null, speakeasy.generateSecret().base32);
   };
 
   PhoneNumber.setup = function() {
     var PhoneNumberModel = this;
 
     PhoneNumberModel.setter.phone = function(value) {
-      this.$phone = value;
+      var ph = phone(value);
+      this.$phone = ph[0];
+      this.$country = ph[1];
     };
 
     PhoneNumberModel.setter.masked = function(value) {
-      this.$masked = value.replace(/(?!^).(?=[^@]+@)/g, '*');
+      this.$masked = value.slice(0, 4) + value.slice(4, value.length).replace(/\d(?=\d{3})/g, '*');
     };
 
     // Make sure verified is not set by creation
@@ -263,7 +288,7 @@ module.exports = function(PhoneNumber) {
     return PhoneNumberModel;
   };
 
-   /*!
+  /*!
    * Setup the base phoneNumber.
    */
 
@@ -301,6 +326,8 @@ function phoneValidator(err) {
   if (typeof value !== 'string')
     return err('string');
   if (value === '') return;
+  if (!phone(value).length)
+    return err('phone');
 }
 
 function joinUrlPath(args) {

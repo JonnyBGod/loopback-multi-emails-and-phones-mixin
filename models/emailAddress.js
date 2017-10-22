@@ -2,226 +2,267 @@
 var isEmail = require('isemail');
 var loopback = require('loopback/lib/loopback');
 var g = require('strong-globalize')();
-var crypto = require('crypto');
+var speakeasy = require('speakeasy');
 var utils = require('loopback/lib/utils');
 var assert = require('assert');
 var path = require('path');
+var qs = require('querystring');
 
 var debug = require('debug')('core:emailAddress');
 
 module.exports = function(EmailAddress) {
   /**
-   * Verify a emailAddress's identity by sending them a confirmation email.
+   * Verify a user's identity by sending them a confirmation message.
+   * NOTE: Currently only email verification is supported
    *
    * ```js
-   *    var options = {
-   *      to: emailAddress.email,
-   *      template: 'verify.ejs',
-   *      redirect: '/',
-   *      tokenGenerator: function (emailAddress, cb) { cb("random-token"); }
-   *    };
+   * var verifyOptions = {
+   *   type: 'email',
+   *   from: 'noreply@example.com'
+   *   template: 'verify.ejs',
+   *   redirect: '/',
+   *   generateVerificationToken: function (user, options, cb) {
+   *     cb('random-token');
+   *   }
+   * };
    *
-   *    emailAddress.verify(options, next);
+   * user.verify(verifyOptions);
    * ```
    *
-   * @options {Object} options
-   * @property {String} type Must be 'email' or 'phone'.
+   * NOTE: the User.getVerifyOptions() method can also be used to ease the
+   * building of identity verification options.
+   *
+   * ```js
+   * var verifyOptions = MyUser.getVerifyOptions();
+   * user.verify(verifyOptions);
+   * ```
+   *
+   * @options {Object} verifyOptions
+   * @property {String} type Must be `'email'` in the current implementation.
+   * @property {Function} mailer A mailer function with a static `.send() method.
+   *  The `.send()` method must accept the verifyOptions object, the method's
+   *  remoting context options object and a callback function with `(err, email)`
+   *  as parameters.
+   *  Defaults to provided `userModel.email` function, or ultimately to LoopBack's
+   *  own mailer function.
    * @property {String} to Email address to which verification email is sent.
-   * @property {String} from Sender email addresss, for example
-   *   `'noreply@myapp.com'`.
+   *  Defaults to user's email. Can also be overriden to a static value for test
+   *  purposes.
+   * @property {String} from Sender email address
+   *  For example `'noreply@example.com'`.
    * @property {String} subject Subject line text.
+   *  Defaults to `'Thanks for Registering'` or a local equivalent.
    * @property {String} text Text of email.
-   * @property {String} template Name of template that displays verification
-   *  page, for example, `'verify.ejs'.
+   *  Defaults to `'Please verify your email by opening this link in a web browser:`
+   *  followed by the verify link.
+   * @property {Object} headers Email headers. None provided by default.
+   * @property {String} template Relative path of template that displays verification
+   *  page. Defaults to `'../../templates/verify.ejs'`.
    * @property {Function} templateFn A function generating the email HTML body
-   * from `verify()` options object and generated attributes like `options.verifyHref`.
-   * It must accept the option object and a callback function with `(err, html)`
-   * as parameters
-   * @property {String} redirect Page to which emailAddress will be redirected after
-   *  they verify their email, for example `'/'` for root URI.
+   *  from `verify()` options object and generated attributes like `options.verifyHref`.
+   *  It must accept the verifyOptions object, the method's remoting context options
+   *  object and a callback function with `(err, html)` as parameters.
+   *  A default templateFn function is provided, see `createVerificationEmailBody()`
+   *  for implementation details.
+   * @property {String} redirect Page to which user will be redirected after
+   *  they verify their email. Defaults to `'/'`.
+   * @property {String} verifyHref The link to include in the user's verify message.
+   *  Defaults to an url analog to:
+   *  `http://host:port/restApiRoot/userRestPath/confirm?uid=userId&redirect=/``
+   * @property {String} host The API host. Defaults to app's host or `localhost`.
+   * @property {String} protocol The API protocol. Defaults to `'http'`.
+   * @property {Number} port The API port. Defaults to app's port or `3000`.
+   * @property {String} restApiRoot The API root path. Defaults to app's restApiRoot
+   *  or `'/api'`
    * @property {Function} generateVerificationToken A function to be used to
-   *  generate the verification token. It must accept the emailAddress object and a
-   *  callback function. This function should NOT add the token to the emailAddress
-   *  object, instead simply execute the callback with the token! EmailAddress saving
-   *  and email sending will be handled in the `verify()` method.
-   * @callback {Function} fn Callback function.
+   *  generate the verification token.
+   *  It must accept the verifyOptions object, the method's remoting context options
+   *  object and a callback function with `(err, hexStringBuffer)` as parameters.
+   *  This function should NOT add the token to the user object, instead simply
+   *  execute the callback with the token! User saving and email sending will be
+   *  handled in the `verify()` method.
+   *  A default token generation function is provided, see `generateVerificationToken()`
+   *  for implementation details.
+   * @callback {Function} cb Callback function.
+   * @param {Object} options remote context options.
    * @param {Error} err Error object.
    * @param {Object} object Contains email, token, uid.
    * @promise
    */
-  EmailAddress.prototype.verify = function(options, fn) {
-    fn = fn || utils.createPromiseCallback();
+
+  EmailAddress.prototype.verify = function(user, verifyOptions, options, cb) {
+    if (cb === undefined && typeof options === 'function') {
+      cb = options;
+      options = undefined;
+    }
+    cb = cb || utils.createPromiseCallback();
 
     var emailAddress = this;
     var emailAddressModel = this.constructor;
+    var userModel = user.constructor;
     var registry = emailAddressModel.registry;
-    assert(typeof options === 'object', 'options required when calling emailAddress.verify()');
-    assert(options.to || this.email,
-      'Must include options.to when calling emailAddress.verify() ' +
-      'or the emailAddress must have an email property');
-    assert(options.from, 'Must include options.from when calling emailAddress.verify()');
+    verifyOptions = Object.assign({}, verifyOptions);
+    // final assertion is performed once all options are assigned
+    assert(typeof verifyOptions === 'object',
+      'verifyOptions object param required when calling emailAddress.verify()');
 
-    options.redirect = options.redirect || '/';
-    var defaultTemplate = path.join(__dirname, '..', 'templates', 'verifyEmail.ejs');
-    options.template = path.resolve(options.template || defaultTemplate);
-    options.emailAddress = this;
-    options.protocol = options.protocol || 'http';
+    // Shallow-clone the options object so that we don't override
+    // the global default options object
+    verifyOptions = Object.assign({}, verifyOptions);
 
-    var app = emailAddressModel.app;
-    options.host = options.host || (app && app.get('host')) || 'localhost';
-    options.port = options.port || (app && app.get('port')) || 3000;
-    options.restApiRoot = options.restApiRoot || (app && app.get('restApiRoot')) || '/api';
+    // Set a default template generation function if none provided
+    verifyOptions.templateFn = verifyOptions.templateFn || createVerificationEmailBody;
 
-    var displayPort = (
-      (options.protocol === 'http' && options.port == '80') ||
-      (options.protocol === 'https' && options.port == '443')
-    ) ? '' : ':' + options.port;
-
-    var urlPath = options.urlPath || joinUrlPath(
-      options.restApiRoot,
-      emailAddressModel.http.path,
-      emailAddressModel.sharedClass.findMethodByName('confirm').http.path
-    );
-
-    options.verifyHref = options.verifyHref ||
-      options.protocol +
-      '://' +
-      options.host +
-      displayPort +
-      urlPath +
-      '?eid=' +
-      emailAddress.id +
-      '&redirect=' +
-      options.redirect;
-
-    options.templateFn = options.templateFn || createVerificationEmailBody;
-
-    // Email model
-    var Email =
-      options.mailer || this.constructor.email || registry.getModelByType(loopback.Email);
-
-    // Set a default token generation function if one is not provided
-    var tokenGenerator = options.generateVerificationToken ||
+    // Set a default token generation function if none provided
+    verifyOptions.generateVerificationToken = verifyOptions.generateVerificationToken ||
       EmailAddress.generateVerificationToken;
 
-    tokenGenerator(emailAddress, function(err, token) {
-      if (err) { return fn(err); }
+    // Set a default mailer function if none provided
+    verifyOptions.mailer = verifyOptions.mailer || EmailAddress.email ||
+      registry.getModelByType(loopback.Email);
 
-      emailAddress.verificationToken = token;
-      emailAddress.save(function(err) {
-        if (err) {
-          fn(err);
-        } else {
-          sendEmail(emailAddress);
-        }
+    var pkName = emailAddressModel.definition.idName() || 'id';
+    verifyOptions.redirect = verifyOptions.redirect || '/';
+    var defaultTemplate = path.join(__dirname, '..', 'templates', 'verifyEmail.ejs');
+    verifyOptions.template = path.resolve(verifyOptions.template || defaultTemplate);
+    verifyOptions.emailAddress = emailAddress;
+    verifyOptions.protocol = verifyOptions.protocol || 'http';
+
+    var app = emailAddressModel.app;
+    verifyOptions.host = verifyOptions.host || (app && app.get('host')) || 'localhost';
+    verifyOptions.port = verifyOptions.port || (app && app.get('port')) || 3000;
+    verifyOptions.restApiRoot = verifyOptions.restApiRoot || (app && app.get('restApiRoot')) || '/api';
+
+    var displayPort = (
+      (verifyOptions.protocol === 'http' && verifyOptions.port == '80') ||
+      (verifyOptions.protocol === 'https' && verifyOptions.port == '443')
+    ) ? '' : ':' + verifyOptions.port;
+
+    var urlPath = joinUrlPath(
+      verifyOptions.restApiRoot,
+      userModel.http.path,
+      userModel.sharedClass.findMethodByName('confirm').http.path
+    );
+
+    verifyOptions.verifyHref = verifyOptions.verifyHref ||
+      verifyOptions.protocol +
+      '://' +
+      verifyOptions.host +
+      displayPort +
+      urlPath +
+      '?' + qs.stringify({
+          uid: '' + verifyOptions.emailAddress[pkName],
+          redirect: verifyOptions.redirect,
+        });
+
+    verifyOptions.to = emailAddress.email;
+    verifyOptions.subject = verifyOptions.subject || g.f('Thanks for Registering');
+    verifyOptions.headers = verifyOptions.headers || {};
+
+    // assert the verifyOptions params that might have been badly defined
+    assertVerifyOptions(verifyOptions);
+
+    // argument "options" is passed depending on verifyOptions.generateVerificationToken function requirements
+    var tokenGenerator = verifyOptions.generateVerificationToken;
+    if (tokenGenerator.length == 3) {
+      tokenGenerator(emailAddress, options, addTokenToUserAndSave);
+    } else {
+      tokenGenerator(emailAddress, addTokenToUserAndSave);
+    }
+
+    function addTokenToUserAndSave(err, secret) {
+      if (err) return cb(err);
+      var token = speakeasy.totp({
+        secret: secret,
+        encoding: 'base32',
+        step: 30 * 60,
       });
-    });
+
+      user.emails.updateById(emailAddress.id, {
+        verificationToken: secret,
+      }, function(err, newEmailAddress) {
+        if (err) return cb(err);
+        emailAddress = newEmailAddress;
+        sendEmail(token, emailAddress);
+      });
+    }
 
     // TODO - support more verification types
-    function sendEmail(emailAddress) {
-      options.verifyHref += '&token=' + emailAddress.verificationToken;
+    function sendEmail(token, emailAddress) {
+      verifyOptions.verifyHref += '&token=' + token;
+      verifyOptions.verificationToken = token;
+      verifyOptions.text = verifyOptions.text || g.f('Please verify your email by opening ' +
+        'this link in a web browser:\n\t%s', verifyOptions.verifyHref);
+      verifyOptions.text = verifyOptions.text.replace(/\{href\}/g, verifyOptions.verifyHref);
 
-      options.text = options.text || g.f('Please verify your email by opening ' +
-        'this link in a web browser:\n\t%s', options.verifyHref);
+      // argument "options" is passed depending on templateFn function requirements
+      var templateFn = verifyOptions.templateFn;
+      if (templateFn.length == 3) {
+        templateFn(verifyOptions, options, setHtmlContentAndSend);
+      } else {
+        templateFn(verifyOptions, setHtmlContentAndSend);
+      }
 
-      options.text = options.text.replace(/\{href\}/g, options.verifyHref);
+      function setHtmlContentAndSend(err, html) {
+        if (err) return cb(err);
 
-      options.to = options.to || emailAddress.email;
+        verifyOptions.html = html;
 
-      options.subject = options.subject || g.f('Thanks for Registering');
-
-      options.headers = options.headers || {};
-
-      options.templateFn(options, function(err, html) {
-        if (err) {
-          fn(err);
-        } else {
-          setHtmlContentAndSend(html);
-        }
-      });
-
-      function setHtmlContentAndSend(html) {
-        options.html = html;
-
-        // Remove options.template to prevent rejection by certain
+        // Remove verifyOptions.template to prevent rejection by certain
         // nodemailer transport plugins.
-        delete options.template;
+        delete verifyOptions.template;
 
-        Email.send(options, function(err, email) {
-          if (err) {
-            fn(err);
-          } else {
-            fn(null, {email: email, token: emailAddress.verificationToken, uid: emailAddress.id});
-          }
-        });
+        // argument "options" is passed depending on Email.send function requirements
+        var Email = verifyOptions.mailer;
+        if (Email.send.length == 3) {
+          Email.send(verifyOptions, options, handleAfterSend);
+        } else {
+          Email.send(verifyOptions, handleAfterSend);
+        }
+
+        function handleAfterSend(err, email) {
+          if (err) return cb(err);
+          cb(null, {email: email, token: token, uid: user[userModel.definition.idName() || 'id']});
+        }
       }
     }
-    return fn.promise;
+
+    return cb.promise;
   };
 
-  function createVerificationEmailBody(options, cb) {
-    var template = loopback.template(options.template);
-    var body = template(options);
+  function assertVerifyOptions(verifyOptions) {
+    assert(verifyOptions.type, 'You must supply a verification type (verifyOptions.type)');
+    assert(verifyOptions.type === 'email', 'Unsupported verification type');
+    assert(verifyOptions.to, 'Must include verifyOptions.to when calling emailAddress.verify() ' +
+      'or the emailAddress must have an email property');
+    assert(verifyOptions.from,
+      'Must include verifyOptions.from when calling emailAddress.verify()');
+    assert(typeof verifyOptions.templateFn === 'function',
+      'templateFn must be a function');
+    assert(typeof verifyOptions.generateVerificationToken === 'function',
+      'generateVerificationToken must be a function');
+    assert(verifyOptions.mailer, 'A mailer function must be provided');
+    assert(typeof verifyOptions.mailer.send === 'function', 'mailer.send must be a function ');
+  }
+
+  function createVerificationEmailBody(verifyOptions, options, cb) {
+    var template = loopback.template(verifyOptions.template);
+    var body = template(verifyOptions);
     cb(null, body);
   }
 
   /**
-   * A default verification token generator which accepts the emailAddress the token is
+   * A default verification token generator which accepts the phoneNumber the token is
    * being generated for and a callback function to indicate completion.
    * This one uses the crypto library and 64 random bytes (converted to hex)
-   * for the token. When used in combination with the emailAddress.verify() method this
-   * function will be called with the `emailAddress` object as it's context (`this`).
+   * for the token. When used in combination with the phoneNumber.verify() method this
+   * function will be called with the `phoneNumber` object as it's context (`this`).
    *
-   * @param {object} emailAddress The EmailAddress this token is being generated for.
+   * @param {object} phoneNumber The EmailAddress this token is being generated for.
    * @param {Function} cb The generator must pass back the new token with this function call
    */
-  EmailAddress.generateVerificationToken = function(emailAddress, cb) {
-    crypto.randomBytes(64, function(err, buf) {
-      cb(err, buf && buf.toString('hex'));
-    });
-  };
-
-  /**
-   * Confirm the emailAddress's validity.
-   *
-   * @param {Any} userId
-   * @param {String} token The validation token
-   * @param {String} redirect URL to redirect the user to once confirmed
-   * @callback {Function} callback
-   * @param {Error} err
-   * @promise
-   */
-  EmailAddress.confirm = function(eid, token, redirect, fn) {
-    fn = fn || utils.createPromiseCallback();
-    this.findById(eid, function(err, email) {
-      if (err) {
-        fn(err);
-      } else {
-        if (email && email.verificationToken === token) {
-          email.verificationToken = null;
-          email.verified = true;
-          email.save(function(err) {
-            if (err) {
-              fn(err);
-            } else {
-              fn();
-            }
-          });
-        } else {
-          if (email) {
-            err = new Error(g.f('Invalid token: %s', token));
-            err.statusCode = 400;
-            err.code = 'INVALID_TOKEN';
-          } else {
-            err = new Error(g.f('EmailAddress not found: %s', eid));
-            err.statusCode = 404;
-            err.code = 'EMAILADDRESS_NOT_FOUND';
-          }
-          fn(err);
-        }
-      }
-    });
-    return fn.promise;
+  EmailAddress.generateVerificationToken = function(phoneNumber, cb) {
+    cb(null, speakeasy.generateSecret().base32);
   };
 
   EmailAddress.setup = function() {
@@ -268,7 +309,7 @@ module.exports = function(EmailAddress) {
     return EmailAddressModel;
   };
 
-   /*!
+  /*!
    * Setup the base emailAddress.
    */
 

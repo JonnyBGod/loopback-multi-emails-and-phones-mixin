@@ -1,6 +1,6 @@
 {
   "name": "EmailAddress",
-  "base": "PersistedModel",
+  "base": "Model",
   "idInjection": true,
   "properties": {
     "email": {

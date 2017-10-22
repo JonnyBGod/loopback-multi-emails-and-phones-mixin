@@ -34,6 +34,7 @@ _beforeEach.withApp = function(app) {
     this.get = _request.get;
     this.put = _request.put;
     this.del = _request.del;
+    this.patch = _request.patch;
 
     if (app.booting) {
       return app.once('booted', done);
@@ -183,7 +184,7 @@ _describe.whenCalledRemotely = function(verb, url, data, cb) {
       var test = this;
       this.http.end(function(err) {
         test.req = test.http.req;
-        test.res = test.http.res;
+        test.res = test.http.response;
         delete test.url;
 
         cb();

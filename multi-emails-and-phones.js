@@ -1,10 +1,12 @@
 'use strict';
 var isEmail = require('isemail');
+var phone = require('phone');
 var async = require('async');
 var g = require('strong-globalize')();
 var loopback = require('loopback/lib/loopback');
 var utils = require('loopback/lib/utils');
 var path = require('path');
+var speakeasy = require('speakeasy');
 
 var DEFAULT_RESET_PW_TTL = 15 * 60; // 15 mins in seconds
 var assert = require('assert');
@@ -22,6 +24,7 @@ module.exports = function(User) {
   User.registry.configureModel(EmailAddress, {
     dataSource: User.getDataSource(),
   });
+  EmailAddress.email = User.email;
 
   User.embedsMany(EmailAddress, {as: 'emails', options: {persistent: true, validate: false}});
 
@@ -183,7 +186,7 @@ module.exports = function(User) {
       query['emailAddresses.email'] = query.email;
       delete query.email;
     } else if (query.phone) {
-      query['phoneNumbers.phone'] = query.phone;
+      query['phoneNumbers.phone'] = phone(query.phone)[0];
       delete query.phone;
     }
 
@@ -234,7 +237,7 @@ module.exports = function(User) {
               fn(err);
             } else if (self.settings.emailVerificationRequired && query['phoneNumbers.phone'] &&
               !user.phoneNumbers.filter(function(e) {
-                return e.phone === query['phoneNumbers.phone'];
+                return e.phone === phone(query['phoneNumbers.phone'])[0];
               })[0].verified) {
               // Fail to log in if phone verification is not done yet
               debug('User phone has not been verified');
@@ -266,129 +269,156 @@ module.exports = function(User) {
     return fn.promise;
   };
 
-  User.observe('before delete', function(ctx, next) {
-    var AccessToken = ctx.Model.relations.accessTokens.modelTo;
-    var EmailAddress = ctx.Model.relations.emails.modelTo;
-    var PhoneNumber = ctx.Model.relations.phones.modelTo;
-    var pkName = ctx.Model.definition.idName() || 'id';
-    ctx.Model.find({where: ctx.where, fields: [pkName]}, function(err, list) {
-      if (err) return next(err);
-
-      var ids = list.map(function(u) { return u[pkName]; });
-      ctx.where = {};
-      ctx.where[pkName] = {inq: ids};
-
-      EmailAddress.destroyAll({userId: {inq: ids}});
-      PhoneNumber.destroyAll({userId: {inq: ids}});
-      AccessToken.destroyAll({userId: {inq: ids}}, next);
-    });
-  });
-
   /**
-   * Verify a user's identity by sending them a confirmation email.
+   * Verify a user's identity by sending them a confirmation message.
    *
    * ```js
-   *    var options = {
-   *      type: 'email' | 'phone',
-   *      to: user.email,
-   *      template: 'verify.ejs',
-   *      redirect: '/',
-   *      tokenGenerator: function (user, cb) { cb("random-token"); }
-   *    };
+   * var verifyOptions = {
+   *   type: 'email',
+   *   from: 'noreply@example.com'
+   *   template: 'verify.ejs',
+   *   redirect: '/',
+   *   generateVerificationToken: function (user, options, cb) {
+   *     cb('random-token');
+   *   }
+   * };
    *
-   *    user.verify(options, next);
+   * user.verify(verifyOptions);
    * ```
    *
-   * @options {Object} options
-   * @property {String} type Must be 'email' or 'phone'.
+   * NOTE: the User.getVerifyOptions() method can also be used to ease the
+   * building of identity verification options.
+   *
+   * ```js
+   * var verifyOptions = MyUser.getVerifyOptions();
+   * user.verify(verifyOptions);
+   * ```
+   *
+   * @options {Object} verifyOptions
+   * @property {String} type Must be `'email'` in the current implementation.
+   * @property {Function} mailer A mailer function with a static `.send() method.
+   *  The `.send()` method must accept the verifyOptions object, the method's
+   *  remoting context options object and a callback function with `(err, email)`
+   *  as parameters.
+   *  Defaults to provided `userModel.email` function, or ultimately to LoopBack's
+   *  own mailer function.
+   * @property {Function} phoner A phoner function with a static `.send() method.
+   *  The `.send()` method must accept the verifyOptions object, the method's
+   *  remoting context options object and a callback function with `(err, email)`
+   *  as parameters.
+   *  Defaults to provided `userModel.email` function, or ultimately to LoopBack's
+   *  own phoner function.
    * @property {String} to Email address to which verification email is sent.
-   * @property {String} from Sender email addresss, for example
-   *   `'noreply@myapp.com'`.
+   *  Defaults to user's email. Can also be overriden to a static value for test
+   *  purposes.
+   * @property {String} from Sender email address
+   *  For example `'noreply@example.com'`.
    * @property {String} subject Subject line text.
+   *  Defaults to `'Thanks for Registering'` or a local equivalent.
    * @property {String} text Text of email.
-   * @property {String} template Name of template that displays verification
-   *  page, for example, `'verify.ejs'.
+   *  Defaults to `'Please verify your email by opening this link in a web browser:`
+   *  followed by the verify link.
+   * @property {Object} headers Email headers. None provided by default.
+   * @property {String} template Relative path of template that displays verification
+   *  page. Defaults to `'../../templates/verify.ejs'`.
    * @property {Function} templateFn A function generating the email HTML body
-   * from `verify()` options object and generated attributes like `options.verifyHref`.
-   * It must accept the option object and a callback function with `(err, html)`
-   * as parameters
+   *  from `verify()` options object and generated attributes like `options.verifyHref`.
+   *  It must accept the verifyOptions object, the method's remoting context options
+   *  object and a callback function with `(err, html)` as parameters.
+   *  A default templateFn function is provided, see `createVerificationEmailBody()`
+   *  for implementation details.
    * @property {String} redirect Page to which user will be redirected after
-   *  they verify their email, for example `'/'` for root URI.
+   *  they verify their email. Defaults to `'/'`.
+   * @property {String} verifyHref The link to include in the user's verify message.
+   *  Defaults to an url analog to:
+   *  `http://host:port/restApiRoot/userRestPath/confirm?uid=userId&redirect=/``
+   * @property {String} host The API host. Defaults to app's host or `localhost`.
+   * @property {String} protocol The API protocol. Defaults to `'http'`.
+   * @property {Number} port The API port. Defaults to app's port or `3000`.
+   * @property {String} restApiRoot The API root path. Defaults to app's restApiRoot
+   *  or `'/api'`
    * @property {Function} generateVerificationToken A function to be used to
-   *  generate the verification token. It must accept the user object and a
-   *  callback function. This function should NOT add the token to the user
-   *  object, instead simply execute the callback with the token! User saving
-   *  and email sending will be handled in the `verify()` method.
-   * @callback {Function} fn Callback function.
+   *  generate the verification token.
+   *  It must accept the verifyOptions object, the method's remoting context options
+   *  object and a callback function with `(err, hexStringBuffer)` as parameters.
+   *  This function should NOT add the token to the user object, instead simply
+   *  execute the callback with the token! User saving and email sending will be
+   *  handled in the `verify()` method.
+   *  A default token generation function is provided, see `generateVerificationToken()`
+   *  for implementation details.
+   * @callback {Function} cb Callback function.
+   * @param {Object} options remote context options.
    * @param {Error} err Error object.
    * @param {Object} object Contains email, token, uid.
    * @promise
    */
 
-  User.prototype.verify = function(options, fn) {
-    fn = fn || utils.createPromiseCallback();
+  User.prototype.verify = function(verifyOptions, options, cb) {
+    if (cb === undefined && typeof options === 'function') {
+      cb = options;
+      options = undefined;
+    }
+    cb = cb || utils.createPromiseCallback();
 
     var user = this;
-    var userModel = this.constructor;
-    var registry = userModel.registry;
-    assert(typeof options === 'object', 'options required when calling user.verify()');
-    assert(options.type, 'You must supply a verification type (options.type)');
-    assert(options.type === 'email' || options.type === 'phone', 'Unsupported verification type');
-    assert(options.to,
-      'Must include options.to when calling user.verify()');
-    assert(options.from, 'Must include options.from when calling user.verify()');
 
-    options.redirect = options.redirect || '/';
-    var defaultTemplate = path.join(__dirname, 'templates', 'verifyEmail.ejs');
-    options.template = path.resolve(options.template || defaultTemplate);
-    options.user = this;
-    options.protocol = options.protocol || 'http';
+    if (!verifyOptions.to) {
+      var targets = [...user.emailAddresses, ...user.phoneNumbers];
+      var target = targets.filter((t) => !t.verified)[0];
+      if (target) {
+        verifyOptions.to = target.id;
+        verifyOptions.type = target.email ? 'email' : 'phone';
+      }
+    }
+    // assert the verifyOptions params that might have been badly defined
+    assertVerifyOptions(verifyOptions);
 
-    var app = userModel.app;
-    options.host = options.host || (app && app.get('host')) || 'localhost';
-    options.port = options.port || (app && app.get('port')) || 3000;
-    options.restApiRoot = options.restApiRoot || (app && app.get('restApiRoot')) || '/api';
-
-    var displayPort = (
-      (options.protocol === 'http' && options.port == '80') ||
-      (options.protocol === 'https' && options.port == '443')
-    ) ? '' : ':' + options.port;
-
-    options.urlPath = joinUrlPath(
-      options.restApiRoot,
-      userModel.http.path,
-      userModel.sharedClass.findMethodByName('confirm').http.path
-    );
-
-    options.verifyHref = options.verifyHref ||
-      options.protocol +
-      '://' +
-      options.host +
-      displayPort +
-      options.urlPath +
-      '?uid=' +
-      options.user.id +
-      '&redirect=' +
-      options.redirect;
-
-    options.mailer = options.mailer ||
-      this.constructor.email ||
-      registry.getModelByType(loopback.Email);
-
-    if (options.type === 'email') {
-      user.emails.findOne({where: {email: options.to}}, function(err, email) {
-        if (err) return fn(err);
-        email.verify(options, fn);
+    if (verifyOptions.type === 'email') {
+      user.emails.findOne({
+        where: {or: [
+          {id: verifyOptions.to},
+          {email: verifyOptions.to},
+        ]},
+      }, function(err, email) {
+        if (err) return cb(err);
+        if (!email) {
+          err = new Error(g.f('No email was found'));
+          err.statusCode = 404;
+          err.code = 'NO_EMAIL_FOUND';
+          return cb(err);
+        }
+        email.verify(user, verifyOptions, options, cb);
       });
-    } else if (options.type === 'phone') {
-      user.phones.findOne({where: {phone: options.to}}, function(err, phone) {
-        if (err) return fn(err);
-        phone.verify(options, fn);
+    } else if (verifyOptions.type === 'phone') {
+      user.phones.findOne({
+        where: {or: [
+          {id: verifyOptions.to},
+          {phone: phone(verifyOptions.to)[0]},
+        ]},
+      }, function(err, phone) {
+        if (err) return cb(err);
+        if (!phone) {
+          err = new Error(g.f('No phone was found'));
+          err.statusCode = 404;
+          err.code = 'NO_PHONE_FOUND';
+          return cb(err);
+        }
+        verifyOptions.to = phone.phone;
+        phone.verify(user, verifyOptions, options, cb);
       });
     }
 
-    return fn.promise;
+    return cb.promise;
   };
+
+  function assertVerifyOptions(verifyOptions) {
+    assert(verifyOptions.type, 'You must supply a verification type (verifyOptions.type)');
+    assert(
+      verifyOptions.type === 'email' || verifyOptions.type === 'phone',
+      'Unsupported verification type'
+    );
+    assert(verifyOptions.to, 'You must supply verifyOptions.to');
+  }
 
   /**
    * Confirm the user's identity.
@@ -407,54 +437,39 @@ module.exports = function(User) {
         fn(err);
       } else {
         if (user) {
-          user.emails.findOne({
-            where: {
-              verificationToken: token,
-            },
-          }, function(err, email) {
-            if (err) {
-              fn(err);
-            } else {
-              if (email) {
-                email.verificationToken = null;
-                email.verified = true;
-                email.save(function(err) {
-                  if (err) {
-                    fn(err);
-                  } else {
-                    fn();
-                  }
-                });
-              } else {
-                user.phones.findOne({
-                  where: {
-                    verificationToken: token,
-                  },
-                }, function(err, phone) {
-                  if (err) {
-                    fn(err);
-                  } else {
-                    if (phone) {
-                      phone.verificationToken = null;
-                      phone.verified = true;
-                      phone.save(function(err) {
-                        if (err) {
-                          fn(err);
-                        } else {
-                          fn();
-                        }
-                      });
-                    } else {
-                      err = new Error(g.f('Invalid token: %s', token));
-                      err.statusCode = 400;
-                      err.code = 'INVALID_TOKEN';
-                      fn(err);
-                    }
-                  }
-                });
-              }
+          var possibleTargets = [...user.emailAddresses, ...user.phoneNumbers];
+          var target = null;
+
+          for (var i = 0; i < possibleTargets.length; i++) {
+            var verified = speakeasy.totp.verify({
+              secret: possibleTargets[i].verificationToken,
+              encoding: 'base32',
+              token: token,
+              step: (possibleTargets[i].email ? 30 : 10) * 60,
+            });
+            if (verified) {
+              target = possibleTargets[i];
+              break;
             }
-          });
+          }
+
+          if (target) {
+            user[target.email ? 'emails' : 'phones'].updateById(target.id, {
+              verificationToken: null,
+              verified: true,
+            }, function(err) {
+              if (err) {
+                fn(err);
+              } else {
+                fn();
+              }
+            });
+          } else {
+            err = new Error(g.f('Invalid token: %s', token));
+            err.statusCode = 400;
+            err.code = 'INVALID_TOKEN';
+            fn(err);
+          }
         } else {
           err = new Error(g.f('User not found: %s', uid));
           err.statusCode = 404;
@@ -482,10 +497,10 @@ module.exports = function(User) {
     var UserModel = this;
     var ttl = UserModel.settings.resetPasswordTokenTTL || DEFAULT_RESET_PW_TTL;
     options = options || {};
-    if (typeof options.email !== 'string') {
+    if (typeof options.email !== 'string' && typeof options.phone !== 'string') {
       var err = new Error(g.f('Email is required'));
-      err.statusCode = 400;
-      err.code = 'EMAIL_REQUIRED';
+      err.statusCode = 404;
+      err.code = 'EMAIL_OR_PHONE_REQUIRED';
       cb(err);
       return cb.promise;
     }
@@ -502,6 +517,7 @@ module.exports = function(User) {
     if (options.email) {
       query['emailAddresses.email'] = options.email;
     } else if (options.phone) {
+      options.phone = phone(options.phone)[0];
       query['phoneNumbers.phone'] = options.phone;
     }
 
@@ -563,12 +579,14 @@ module.exports = function(User) {
             email: options.email,
             accessToken: accessToken,
             user: user,
+            options: options,
           });
         } else if (options.phone) {
           UserModel.emit('resetPasswordRequest', {
             phone: options.phone,
             accessToken: accessToken,
             user: user,
+            options: options,
           });
         }
       }
@@ -578,7 +596,7 @@ module.exports = function(User) {
   };
 
   User.validateUniqueness = function(value, type, isNewRecord, realm, done) {
-    var UserModel = this;
+    var self = this;
 
     if (blank(value)) {
       return process.nextTick(done);
@@ -587,21 +605,22 @@ module.exports = function(User) {
     var cond = {where: {}};
 
     if (type === 'email') {
-      if (!User.settings.caseSensitiveEmail) {
+      if (!self.settings.caseSensitiveEmail) {
         cond.where['emailAddresses.email'] = value.toLowerCase();
       } else {
         cond.where['emailAddresses.email'] = value;
       }
     } else if (type === 'phone') {
-      cond.where['phoneNumbers.phone'] = value;
+      cond.where['phoneNumbers.phone'] = phone(value)[0];
     }
 
-    if (UserModel.settings.realmRequired && UserModel.settings.realmDelimiter) {
-      if (realm !== undefined)
+    if (self.settings.realmRequired && self.settings.realmDelimiter) {
+      if (typeof realm !== 'undefined') {
         cond.where['realm'] = realm;
+      }
     }
 
-    User.find(cond, function(error, found) {
+    self.find(cond, function(error, found) {
       if (error) {
         done(error);
       } else if (found.length > 1) {
@@ -628,7 +647,7 @@ module.exports = function(User) {
       err.name = 'ValidationError';
       err.statusCode = 422;
       err.details = {
-        context: UserModel.modelName,
+        context: self.modelName,
         codes: {
           email: ['custom.email'],
         },
@@ -640,10 +659,11 @@ module.exports = function(User) {
 
   User.prototype.setPrimaryEmail = function(fk, fn) {
     fn = fn || utils.createPromiseCallback();
+    var self = this;
 
     var emailIds = this.emailAddresses.map(function(address) { return address.id; });
 
-    User.relations.emails.modelTo.updateAll({
+    self.constructor.relations.emails.modelTo.updateAll({
       id: {
         inq: emailIds,
       },
@@ -652,7 +672,7 @@ module.exports = function(User) {
     }, function(err, info) {
       if (err) return fn(err);
 
-      User.relations.emails.modelTo.updateAll({
+      self.constructor.relations.emails.modelTo.updateAll({
         id: fk,
       }, {
         primary: true,
@@ -664,10 +684,11 @@ module.exports = function(User) {
 
   User.prototype.setPrimaryPhone = function(fk, fn) {
     fn = fn || utils.createPromiseCallback();
+    var self = this;
 
     var phoneIds = this.phoneNumbers.map(function(number) { return number.id; });
 
-    User.relations.phones.modelTo.updateAll({
+    self.constructor.relations.phones.modelTo.updateAll({
       id: {
         inq: phoneIds,
       },
@@ -676,7 +697,7 @@ module.exports = function(User) {
     }, function(err, info) {
       if (err) return fn(err);
 
-      User.relations.phones.modelTo.updateAll({
+      self.constructor.relations.phones.modelTo.updateAll({
         id: fk,
       }, {
         primary: true,
@@ -696,9 +717,6 @@ module.exports = function(User) {
     if (this.settings.hidden.indexOf('phone') === -1) {
       this.settings.hidden.push('phone');
     }
-
-    this.settings.realmRequired = this.settings.realmRequired || null;
-    this.settings.realmDelimiter = this.settings.realmDelimiter || null;
 
     if (this.settings.base === 'User') {
       this.base.clearObservers('before delete');
@@ -863,25 +881,36 @@ module.exports = function(User) {
 
     if (ctx.isNewInstance) {
       var err;
-      if (!ctx.instance.email) {
-        err = new Error(g.f('Must provide a valid email'));
+      if (!ctx.instance.email && !ctx.instance.phone) {
+        err = new Error(g.f('Must provide a valid email or phone'));
         err.name = 'ValidationError';
         err.statusCode = 422;
         err.details = {
-          context: User.modelName,
+          context: ctx.instance.constructor.modelName,
           codes: {
             email: ['presence'],
           },
         };
         return next(err);
-      } else if (!isEmail.validate(ctx.instance.email)) {
+      } else if (ctx.instance.email && !isEmail.validate(ctx.instance.email)) {
         err = new Error(g.f('Must provide a valid email'));
         err.name = 'ValidationError';
         err.statusCode = 422;
         err.details = {
-          context: User.modelName,
+          context: ctx.instance.constructor.modelName,
           codes: {
             email: ['custom.email'],
+          },
+        };
+        return next(err);
+      } else if (ctx.instance.phone && !phone(ctx.instance.phone).length) {
+        err = new Error(g.f('Must provide a valid phone'));
+        err.name = 'ValidationError';
+        err.statusCode = 422;
+        err.details = {
+          context: ctx.instance.constructor.modelName,
+          codes: {
+            phone: ['custom.phone'],
           },
         };
         return next(err);
@@ -889,13 +918,12 @@ module.exports = function(User) {
     }
 
     if (ctx.instance.email || ctx.instance.phone) {
-      var realm = ctx.instance.realm;
-
       async.parallel([
         function(callback) {
           if (!ctx.instance.email) return callback();
 
-          User.validateUniqueness(ctx.instance.email, 'email', ctx.isNewInstance, realm,
+          ctx.instance.constructor.validateUniqueness(
+            ctx.instance.email, 'email', ctx.isNewInstance, ctx.instance.realm,
             function(err) {
               ctx.hookState.email = ctx.instance.email;
               ctx.instance.unsetAttribute('email');
@@ -906,7 +934,8 @@ module.exports = function(User) {
         function(callback) {
           if (!ctx.instance.phone) return callback();
 
-          User.validateUniqueness(ctx.instance.phone, 'phone', ctx.isNewInstance, realm,
+          ctx.instance.constructor.validateUniqueness(
+            ctx.instance.phone, 'phone', ctx.isNewInstance, ctx.instance.realm,
             function(err) {
               ctx.hookState.phone = ctx.instance.phone;
               ctx.instance.unsetAttribute('phone');
@@ -985,10 +1014,10 @@ module.exports = function(User) {
     ctx.hookState.isPasswordChange = isPartialUpdateChangingPassword ||
       isFullReplaceChangingPassword;
 
-    ctx.Model.find({where: where}, function(err, userInstances) {
+    ctx.Model.find({where: where}, ctx.options, function(err, userInstances) {
       if (err) return next(err);
       ctx.hookState.originalUserData = userInstances.map(function(u) {
-        return {id: u.id, emailAddresses: u.emailAddresses};
+        return {id: u.id, emailAddresses: u.emailAddresses, phoneNumbers: u.phoneNumbers};
       });
 
       next();
@@ -1000,23 +1029,43 @@ module.exports = function(User) {
     if (!ctx.hookState.originalUserData) return next();
 
     var newEmail = (ctx.instance || ctx.data).email;
+    var newPhone = (ctx.instance || ctx.data).phone && phone((ctx.instance || ctx.data).phone)[0];
     var isPasswordChange = ctx.hookState.isPasswordChange;
 
-    if (!newEmail && !isPasswordChange) return next();
+    if (!newEmail && !newPhone && !isPasswordChange) return next();
 
     var userIdsToExpire = ctx.hookState.originalUserData.filter(function(u) {
-      return (newEmail && u.emailAddresses.filter(function(e) {
+      return (newEmail && !u.emailAddresses.filter(function(e) {
         return e.email === newEmail;
-      }).length === 0) || isPasswordChange;
+      }).length) || (newPhone && !u.phoneNumbers.filter(function(e) {
+        return e.phone === newPhone;
+      }).length) || isPasswordChange;
     }).map(function(u) {
       return u.id;
     });
-    console.log(userIdsToExpire);
-    ctx.Model._invalidateAccessTokensOfUsers(userIdsToExpire, next);
+    ctx.Model._invalidateAccessTokensOfUsers(userIdsToExpire, ctx.options, next);
   };
 
   User.observe('before save', User.helpers.beforeEmailUpdate);
   User.observe('after save', User.helpers.afterEmailUpdate);
+
+  User.observe('before delete', function(ctx, next) {
+    var AccessToken = ctx.Model.relations.accessTokens.modelTo;
+    var EmailAddress = ctx.Model.relations.emails.modelTo;
+    var PhoneNumber = ctx.Model.relations.phones.modelTo;
+    var pkName = ctx.Model.definition.idName() || 'id';
+    ctx.Model.find({where: ctx.where, fields: [pkName]}, function(err, list) {
+      if (err) return next(err);
+
+      var ids = list.map(function(u) { return u[pkName]; });
+      ctx.where = {};
+      ctx.where[pkName] = {inq: ids};
+
+      EmailAddress.destroyAll({userId: {inq: ids}});
+      PhoneNumber.destroyAll({userId: {inq: ids}});
+      AccessToken.destroyAll({userId: {inq: ids}}, next);
+    });
+  });
 
   // Clean user related models
   User.observe('after delete', function(ctx, next) {
@@ -1024,7 +1073,7 @@ module.exports = function(User) {
     var whereId = ctx.where && ctx.where[ctx.Model.definition.idName() || 'id'];
     if (!(whereId || instanceId)) return next();
 
-    ctx.Model._invalidateAccessTokensOfUsers([instanceId || whereId], next);
+    ctx.Model._invalidateAccessTokensOfUsers([instanceId || whereId], ctx.options, next);
   });
 
   User.beforeRemote('prototype.__create__emails', function(ctx, user, next) {
@@ -1033,14 +1082,11 @@ module.exports = function(User) {
       body.verified = false;
     }
 
-    var realm;
-    if (ctx.instance) {
-      realm = ctx.instance.realm;
-    }
-
-    User.validateUniqueness(body.email, 'email', true, realm, function(err) {
-      next(err);
-    });
+    ctx.instance.constructor.validateUniqueness(
+      body.email, 'email', true, ctx.instance.realm,
+      function(err) {
+        next(err);
+      });
   });
 
   User.beforeRemote('prototype.__create__phones', function(ctx, user, next) {
@@ -1049,14 +1095,11 @@ module.exports = function(User) {
       body.verified = false;
     }
 
-    var realm;
-    if (ctx.instance) {
-      realm = ctx.instance.realm;
-    }
-
-    User.validateUniqueness(body.phone, 'phone', true, realm, function(err) {
-      next(err);
-    });
+    ctx.instance.constructor.validateUniqueness(
+      body.phone, 'phone', true, ctx.instance.realm,
+      function(err) {
+        next(err);
+      });
   });
 };
 
