@@ -47,6 +47,9 @@
       "path": "./node_modules/cz-conventional-changelog"
     }
   },
+  "engines": {
+    "node": ">=8.3.0"
+  },
   "dependencies": {
     "async": "^2.5.0",
     "debug": "^3.1.0",
