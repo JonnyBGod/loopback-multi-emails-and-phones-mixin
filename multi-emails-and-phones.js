@@ -13,13 +13,17 @@ var assert = require('assert');
 
 var debug = require('debug')('loopback:user');
 
-module.exports = function(User) {
+module.exports = function(User, options) {
   delete User.validations.email;
 
   var Phone = User.registry.createModel(require('./models/phone.json'));
   require('./models/phone.js')(Phone);
 
-  var EmailAddress = User.registry.createModel(require('./models/emailAddress.json'));
+  var emailAddressSchema = require('./models/emailAddress.json')
+  if (options.showEmail)
+    emailAddressSchema.hidden.splice(emailAddressSchema.hidden.indexOf('email'), 1)
+  
+  var EmailAddress = User.registry.createModel(emailAddressSchema);
   require('./models/emailAddress.js')(EmailAddress);
   User.registry.configureModel(EmailAddress, {
     dataSource: User.getDataSource(),
