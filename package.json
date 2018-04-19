@@ -4,11 +4,11 @@
   "description": "A mixin to enable including Through model properties",
   "main": "include-through.js",
   "scripts": {
-    "test": "./node_modules/mocha/bin/mocha --recursive ./test",
+    "test": "./node_modules/mocha/bin/mocha --exit --recursive ./test",
     "posttest": "npm run lint",
     "lint": "eslint ./*.js",
     "commit": "git-cz",
-    "semantic-release": "semantic-release pre && npm publish && semantic-release post"
+    "semantic-release": "semantic-release"
   },
   "devDependencies": {
     "chai": "^4.1.2",
