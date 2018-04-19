@@ -450,7 +450,7 @@ module.exports = function(User, options) {
               secret: possibleTargets[i].verificationToken,
               encoding: 'base32',
               token: token,
-              step: (possibleTargets[i].email ? 30 : 10) * 60,
+              step: (possibleTargets[i] instanceof EmailAddress ? 30 : 10) * 60,
             });
             if (verified) {
               target = possibleTargets[i];
