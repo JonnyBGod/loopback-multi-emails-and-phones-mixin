@@ -459,7 +459,7 @@ module.exports = function(User, options) {
           }
 
           if (target) {
-            user[target.email ? 'emails' : 'phones'].updateById(target.id, {
+            user[target instanceof EmailAddress ? 'emails' : 'phones'].updateById(target.id, {
               verificationToken: null,
               verified: true,
             }, function(err) {
