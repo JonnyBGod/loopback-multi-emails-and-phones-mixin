@@ -6,25 +6,25 @@
   "scripts": {
     "test": "./node_modules/mocha/bin/mocha --exit --recursive ./test",
     "posttest": "npm run lint",
-    "lint": "eslint ./*.js",
+    "lint": "eslint ./*.js && eslint ./models/*.js",
     "commit": "git-cz",
     "semantic-release": "semantic-release"
   },
   "devDependencies": {
-    "chai": "^4.1.2",
-    "commitizen": "^2.9.6",
+    "chai": "^4.2.0",
+    "commitizen": "^3.0.5",
     "cz-conventional-changelog": "^2.1.0",
     "dirty-chai": "^2.0.1",
-    "eslint": "^4.19.1",
-    "eslint-config-loopback": "^10.0.0",
-    "loopback": "^3.19.0",
+    "eslint": "^5.11.1",
+    "eslint-config-loopback": "^13.0.0",
+    "loopback": "^3.24.0",
     "loopback-boot": "^2.27.1",
-    "mocha": "^5.1.1",
-    "semantic-release": "^15.1.7",
-    "sinon": "^4.5.0",
-    "sinon-chai": "^3.0.0",
-    "strong-error-handler": "^2.3.2",
-    "supertest": "^3.0.0"
+    "mocha": "^5.2.0",
+    "semantic-release": "^15.13.2",
+    "sinon": "^7.2.2",
+    "sinon-chai": "^3.3.0",
+    "strong-error-handler": "^3.2.0",
+    "supertest": "^3.3.0"
   },
   "repository": {
     "type": "git",
@@ -51,11 +51,11 @@
     "node": ">=8.3.0"
   },
   "dependencies": {
-    "async": "^2.6.0",
-    "debug": "^3.1.0",
-    "isemail": "^3.1.2",
-    "phone": "^2.0.0-rc.1",
+    "async": "^2.6.1",
+    "debug": "^4.1.1",
+    "isemail": "^3.2.0",
+    "phone": "^2.3.2",
     "speakeasy": "^2.0.0",
-    "strong-globalize": "^3.3.0"
+    "strong-globalize": "^4.1.2"
   }
 }

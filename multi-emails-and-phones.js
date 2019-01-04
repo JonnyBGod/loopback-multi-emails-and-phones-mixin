@@ -1,30 +1,30 @@
 'use strict';
-var isEmail = require('isemail');
-var phone = require('phone');
-var async = require('async');
-var g = require('strong-globalize')();
-var loopback = require('loopback/lib/loopback');
-var utils = require('loopback/lib/utils');
-var path = require('path');
-var speakeasy = require('speakeasy');
+const isEmail = require('isemail');
+const phone = require('phone');
+const async = require('async');
+const g = require('strong-globalize')();
+const loopback = require('loopback/lib/loopback');
+const utils = require('loopback/lib/utils');
+const path = require('path');
+const speakeasy = require('speakeasy');
 
-var DEFAULT_RESET_PW_TTL = 15 * 60; // 15 mins in seconds
-var assert = require('assert');
+const DEFAULT_RESET_PW_TTL = 15 * 60; // 15 mins in seconds
+const assert = require('assert');
 
-var debug = require('debug')('loopback:user');
+const debug = require('debug')('loopback:user');
 
 module.exports = function(User, options) {
   delete User.validations.email;
 
-  var Phone = User.registry.createModel(require('./models/phone.json'));
+  const Phone = User.registry.createModel(require('./models/phone.json'));
   require('./models/phone.js')(Phone);
 
-  var emailAddressSchema = require('./models/emailAddress.json');
+  const emailAddressSchema = require('./models/emailAddress.json');
   if (options.showEmail) {
     emailAddressSchema.hidden.splice(emailAddressSchema.hidden.indexOf('email'), 1);
   }
 
-  var EmailAddress = User.registry.createModel(emailAddressSchema);
+  const EmailAddress = User.registry.createModel(emailAddressSchema);
   require('./models/emailAddress.js')(EmailAddress);
   User.registry.configureModel(EmailAddress, {
     dataSource: User.getDataSource(),
@@ -33,7 +33,12 @@ module.exports = function(User, options) {
 
   User.embedsMany(EmailAddress, {as: 'emails', options: {persistent: true, validate: false}});
 
-  var PhoneNumber = User.registry.createModel(require('./models/phoneNumber.json'));
+  const phoneNumberSchema = require('./models/phoneNumber.json');
+  if (options.showPhone) {
+    phoneNumberSchema.hidden.splice(phoneNumberSchema.hidden.indexOf('phone'), 1);
+  }
+
+  const PhoneNumber = User.registry.createModel(phoneNumberSchema);
   require('./models/phoneNumber.js')(PhoneNumber);
   User.registry.configureModel(PhoneNumber, {
     dataSource: User.getDataSource(),
@@ -53,11 +58,11 @@ module.exports = function(User, options) {
   };
 
   function splitPrincipal(name, realmDelimiter) {
-    var parts = [null, name];
+    const parts = [null, name];
     if (!realmDelimiter) {
       return parts;
     }
-    var index = name.indexOf(realmDelimiter);
+    const index = name.indexOf(realmDelimiter);
     if (index !== -1) {
       parts[0] = name.substring(0, index);
       parts[1] = name.substring(index + realmDelimiter.length);
@@ -73,7 +78,7 @@ module.exports = function(User, options) {
    * @returns {Object} The normalized credential object
    */
   User.normalizeCredentials = function(credentials, realmRequired, realmDelimiter) {
-    var query = {};
+    const query = {};
     credentials = credentials || {};
     if (!realmRequired) {
       if (credentials.email) {
@@ -87,7 +92,7 @@ module.exports = function(User, options) {
       if (credentials.realm) {
         query.realm = credentials.realm;
       }
-      var parts;
+      let parts;
       if (credentials.email) {
         parts = splitPrincipal(credentials.email, realmDelimiter);
         query.email = parts[1];
@@ -130,8 +135,8 @@ module.exports = function(User, options) {
    */
 
   User.login = function(credentials, include, fn) {
-    var self = this;
-    var includeRelations, realmDelimiter;
+    const self = this;
+    let includeRelations, realmDelimiter;
 
     if (typeof include === 'function') {
       fn = include;
@@ -164,23 +169,23 @@ module.exports = function(User, options) {
     }
 
     // Check if realm is required
-    var realmRequired = !!(self.settings.realmRequired ||
+    const realmRequired = !!(self.settings.realmRequired ||
       self.settings.realmDelimiter);
     if (realmRequired) {
       realmDelimiter = self.settings.realmDelimiter;
     }
-    var query = self.normalizeCredentials(credentials, realmRequired,
+    const query = self.normalizeCredentials(credentials, realmRequired,
       realmDelimiter);
 
     if (realmRequired && !query.realm) {
-      var err1 = new Error(g.f('{{realm}} is required'));
+      const err1 = new Error(g.f('{{realm}} is required'));
       err1.statusCode = 400;
       err1.code = 'REALM_REQUIRED';
       fn(err1);
       return fn.promise;
     }
     if (!query.email && !query.username && !query.phone) {
-      var err2 = new Error(g.f('{{username}}, {{email}} or {{phone}} is required'));
+      const err2 = new Error(g.f('{{username}}, {{email}} or {{phone}} is required'));
       err2.statusCode = 400;
       err2.code = 'USERNAME_EMAIL_PHONE_REQUIRED';
       fn(err2);
@@ -197,7 +202,7 @@ module.exports = function(User, options) {
 
     self.findOne({where: query, include: includeRelations}, function(err, user) {
       function defaultError() {
-        var defError = new Error(g.f('login failed'));
+        const defError = new Error(g.f('login failed'));
         defError.statusCode = 401;
         defError.code = 'LOGIN_FAILED';
 
@@ -365,11 +370,11 @@ module.exports = function(User, options) {
     }
     cb = cb || utils.createPromiseCallback();
 
-    var user = this;
+    const user = this;
 
     if (!verifyOptions.to) {
-      var targets = [...user.emailAddresses, ...user.phoneNumbers];
-      var target = targets.filter((t) => !t.verified)[0];
+      const targets = [...user.emailAddresses, ...user.phoneNumbers];
+      const target = targets.filter((t) => !t.verified)[0];
       if (target) {
         verifyOptions.to = target.id;
         verifyOptions.type = target.email ? 'email' : 'phone';
@@ -442,11 +447,11 @@ module.exports = function(User, options) {
         fn(err);
       } else {
         if (user) {
-          var possibleTargets = [...user.emailAddresses, ...user.phoneNumbers];
-          var target = null;
+          const possibleTargets = [...user.emailAddresses, ...user.phoneNumbers];
+          let target = null;
 
-          for (var i = 0; i < possibleTargets.length; i++) {
-            var verified = speakeasy.totp.verify({
+          for (let i = 0; i < possibleTargets.length; i++) {
+            const verified = speakeasy.totp.verify({
               secret: possibleTargets[i].verificationToken,
               encoding: 'base32',
               token: token,
@@ -499,11 +504,11 @@ module.exports = function(User, options) {
 
   User.resetPassword = function(options, cb) {
     cb = cb || utils.createPromiseCallback();
-    var UserModel = this;
-    var ttl = UserModel.settings.resetPasswordTokenTTL || DEFAULT_RESET_PW_TTL;
+    const UserModel = this;
+    const ttl = UserModel.settings.resetPasswordTokenTTL || DEFAULT_RESET_PW_TTL;
     options = options || {};
     if (typeof options.email !== 'string' && typeof options.phone !== 'string') {
-      var err = new Error(g.f('Email is required'));
+      const err = new Error(g.f('Email is required'));
       err.statusCode = 404;
       err.code = 'EMAIL_OR_PHONE_REQUIRED';
       cb(err);
@@ -518,7 +523,7 @@ module.exports = function(User, options) {
       return cb(err);
     }
 
-    var query = {};
+    const query = {};
     if (options.email) {
       query['emailAddresses.email'] = options.email;
     } else if (options.phone) {
@@ -601,13 +606,13 @@ module.exports = function(User, options) {
   };
 
   User.validateUniqueness = function(value, type, isNewRecord, realm, done) {
-    var self = this;
+    const self = this;
 
     if (blank(value)) {
       return process.nextTick(done);
     }
 
-    var cond = {where: {}};
+    const cond = {where: {}};
 
     if (type === 'email') {
       if (!self.settings.caseSensitiveEmail) {
@@ -642,7 +647,7 @@ module.exports = function(User, options) {
     }.bind(this));
 
     function generateError() {
-      var err;
+      let err;
       if (type === 'email') {
         err = new Error(g.f('Email already exists'));
       } else {
@@ -664,9 +669,9 @@ module.exports = function(User, options) {
 
   User.prototype.setPrimaryEmail = function(fk, fn) {
     fn = fn || utils.createPromiseCallback();
-    var self = this;
+    const self = this;
 
-    var emailIds = this.emailAddresses.map(function(address) { return address.id; });
+    const emailIds = this.emailAddresses.map(function(address) { return address.id; });
 
     self.constructor.relations.emails.modelTo.updateAll({
       id: {
@@ -689,9 +694,9 @@ module.exports = function(User, options) {
 
   User.prototype.setPrimaryPhone = function(fk, fn) {
     fn = fn || utils.createPromiseCallback();
-    var self = this;
+    const self = this;
 
-    var phoneIds = this.phoneNumbers.map(function(number) { return number.id; });
+    const phoneIds = this.phoneNumbers.map(function(number) { return number.id; });
 
     self.constructor.relations.phones.modelTo.updateAll({
       id: {
@@ -863,7 +868,8 @@ module.exports = function(User, options) {
         // This is a programmer's error, use the default status code 500
         return next(new Error(
           'Invalid use of "options.setPassword". Only "password" can be ' +
-          'changed when using this option.'));
+          'changed when using this option.'
+        ));
       }
 
       return next();
@@ -875,7 +881,8 @@ module.exports = function(User, options) {
 
     const err = new Error(
       'Changing user password via patch/replace API is not allowed. ' +
-      'Use changePassword() or setPassword() instead.');
+      'Use changePassword() or setPassword() instead.'
+    );
     err.statusCode = 401;
     err.code = 'PASSWORD_CHANGE_NOT_ALLOWED';
     next(err);
@@ -885,7 +892,7 @@ module.exports = function(User, options) {
     if (!ctx.isNewInstance || !ctx.instance) return next();
 
     if (ctx.isNewInstance) {
-      var err;
+      let err;
       if (!ctx.instance.email && !ctx.instance.phone) {
         err = new Error(g.f('Must provide a valid email or phone'));
         err.name = 'ValidationError';
@@ -934,7 +941,8 @@ module.exports = function(User, options) {
               ctx.instance.unsetAttribute('email');
 
               callback(err);
-            });
+            }
+          );
         },
         function(callback) {
           if (!ctx.instance.phone) return callback();
@@ -946,7 +954,8 @@ module.exports = function(User, options) {
               ctx.instance.unsetAttribute('phone');
 
               callback(err);
-            });
+            }
+          );
         },
       ], next);
     } else {
@@ -967,7 +976,7 @@ module.exports = function(User, options) {
             primary: true,
           },
         }, function(err, nEmails) {
-          var newEmail = {
+          const newEmail = {
             email: ctx.hookState.email,
           };
           if (nEmails < 1) {
@@ -984,7 +993,7 @@ module.exports = function(User, options) {
             primary: true,
           },
         }, function(err, nPhones) {
-          var newPhone = {
+          const newPhone = {
             phone: ctx.hookState.phone,
           };
           if (nPhones < 1) {
@@ -1006,15 +1015,15 @@ module.exports = function(User, options) {
   User.helpers.beforeEmailUpdate = function(ctx, next) {
     if (ctx.isNewInstance) return next();
     if (!ctx.where && !ctx.instance) return next();
-    var where = ctx.where || {id: ctx.instance.id};
+    const where = ctx.where || {id: ctx.instance.id};
 
-    var isPartialUpdateChangingPassword = ctx.data && 'password' in ctx.data;
+    const isPartialUpdateChangingPassword = ctx.data && 'password' in ctx.data;
 
     // Full replace of User instance => assume password change.
     // HashPassword returns a different value for each invocation,
     // therefore we cannot tell whether ctx.instance.password is the same
     // or not.
-    var isFullReplaceChangingPassword = !!ctx.instance;
+    const isFullReplaceChangingPassword = !!ctx.instance;
 
     ctx.hookState.isPasswordChange = isPartialUpdateChangingPassword ||
       isFullReplaceChangingPassword;
@@ -1033,13 +1042,13 @@ module.exports = function(User, options) {
     if (!ctx.instance && !ctx.data) return next();
     if (!ctx.hookState.originalUserData) return next();
 
-    var newEmail = (ctx.instance || ctx.data).email;
-    var newPhone = (ctx.instance || ctx.data).phone && phone((ctx.instance || ctx.data).phone)[0];
-    var isPasswordChange = ctx.hookState.isPasswordChange;
+    const newEmail = (ctx.instance || ctx.data).email;
+    const newPhone = (ctx.instance || ctx.data).phone && phone((ctx.instance || ctx.data).phone)[0];
+    const isPasswordChange = ctx.hookState.isPasswordChange;
 
     if (!newEmail && !newPhone && !isPasswordChange) return next();
 
-    var userIdsToExpire = ctx.hookState.originalUserData.filter(function(u) {
+    const userIdsToExpire = ctx.hookState.originalUserData.filter(function(u) {
       return (newEmail && !u.emailAddresses.filter(function(e) {
         return e.email === newEmail;
       }).length) || (newPhone && !u.phoneNumbers.filter(function(e) {
@@ -1055,14 +1064,14 @@ module.exports = function(User, options) {
   User.observe('after save', User.helpers.afterEmailUpdate);
 
   User.observe('before delete', function(ctx, next) {
-    var AccessToken = ctx.Model.relations.accessTokens.modelTo;
-    var EmailAddress = ctx.Model.relations.emails.modelTo;
-    var PhoneNumber = ctx.Model.relations.phones.modelTo;
-    var pkName = ctx.Model.definition.idName() || 'id';
+    const AccessToken = ctx.Model.relations.accessTokens.modelTo;
+    const EmailAddress = ctx.Model.relations.emails.modelTo;
+    const PhoneNumber = ctx.Model.relations.phones.modelTo;
+    const pkName = ctx.Model.definition.idName() || 'id';
     ctx.Model.find({where: ctx.where, fields: [pkName]}, function(err, list) {
       if (err) return next(err);
 
-      var ids = list.map(function(u) { return u[pkName]; });
+      const ids = list.map(function(u) { return u[pkName]; });
       ctx.where = {};
       ctx.where[pkName] = {inq: ids};
 
@@ -1074,15 +1083,15 @@ module.exports = function(User, options) {
 
   // Clean user related models
   User.observe('after delete', function(ctx, next) {
-    var instanceId = ctx.instance && ctx.instance[ctx.Model.definition.idName() || 'id'];
-    var whereId = ctx.where && ctx.where[ctx.Model.definition.idName() || 'id'];
+    const instanceId = ctx.instance && ctx.instance[ctx.Model.definition.idName() || 'id'];
+    const whereId = ctx.where && ctx.where[ctx.Model.definition.idName() || 'id'];
     if (!(whereId || instanceId)) return next();
 
     ctx.Model._invalidateAccessTokensOfUsers([instanceId || whereId], ctx.options, next);
   });
 
   User.beforeRemote('prototype.__create__emails', function(ctx, user, next) {
-    var body = ctx.req.body;
+    const body = ctx.req.body;
     if (body && body.verified) {
       body.verified = false;
     }
@@ -1091,11 +1100,12 @@ module.exports = function(User, options) {
       body.email, 'email', true, ctx.instance.realm,
       function(err) {
         next(err);
-      });
+      }
+    );
   });
 
   User.beforeRemote('prototype.__create__phones', function(ctx, user, next) {
-    var body = ctx.req.body;
+    const body = ctx.req.body;
     if (body && body.verified) {
       body.verified = false;
     }
@@ -1104,7 +1114,8 @@ module.exports = function(User, options) {
       body.phone, 'phone', true, ctx.instance.realm,
       function(err) {
         next(err);
-      });
+      }
+    );
   });
 };
 
@@ -1118,9 +1129,9 @@ function blank(v) {
 }
 
 function joinUrlPath(args) {
-  var result = arguments[0];
-  for (var ix = 1; ix < arguments.length; ix++) {
-    var next = arguments[ix];
+  let result = arguments[0];
+  for (let ix = 1; ix < arguments.length; ix++) {
+    const next = arguments[ix];
     result += result[result.length - 1] === '/' && next[0] === '/' ?
       next.slice(1) : next;
   }

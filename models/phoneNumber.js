@@ -1,14 +1,14 @@
 'use strict';
-var loopback = require('loopback/lib/loopback');
-var g = require('strong-globalize')();
-var speakeasy = require('speakeasy');
-var utils = require('loopback/lib/utils');
-var assert = require('assert');
-var path = require('path');
-var qs = require('querystring');
-var phone = require('phone');
+const loopback = require('loopback/lib/loopback');
+const g = require('strong-globalize')();
+const speakeasy = require('speakeasy');
+const utils = require('loopback/lib/utils');
+const assert = require('assert');
+const path = require('path');
+const qs = require('querystring');
+const phone = require('phone');
 
-var debug = require('debug')('core:phoneNumber');
+const debug = require('debug')('core:phoneNumber');
 
 module.exports = function(PhoneNumber) {
   /**
@@ -95,10 +95,10 @@ module.exports = function(PhoneNumber) {
     }
     cb = cb || utils.createPromiseCallback();
 
-    var phoneNumber = this;
-    var phoneNumberModel = this.constructor;
-    var userModel = user.constructor;
-    var registry = phoneNumberModel.registry;
+    let phoneNumber = this;
+    const phoneNumberModel = this.constructor;
+    const userModel = user.constructor;
+    const registry = phoneNumberModel.registry;
     verifyOptions = Object.assign({}, verifyOptions);
     // final assertion is performed once all options are assigned
     assert(typeof verifyOptions === 'object',
@@ -119,24 +119,24 @@ module.exports = function(PhoneNumber) {
     verifyOptions.phoner = verifyOptions.phoner || userModel.phone ||
       registry.getModelByType(loopback.Email);
 
-    var pkName = phoneNumberModel.definition.idName() || 'id';
+    const pkName = phoneNumberModel.definition.idName() || 'id';
     verifyOptions.redirect = verifyOptions.redirect || '/';
-    var defaultTemplate = path.join(__dirname, '..', 'templates', 'verifyPhone.ejs');
+    const defaultTemplate = path.join(__dirname, '..', 'templates', 'verifyPhone.ejs');
     verifyOptions.template = path.resolve(verifyOptions.template || defaultTemplate);
     verifyOptions.phoneNumber = phoneNumber;
     verifyOptions.protocol = verifyOptions.protocol || 'http';
 
-    var app = phoneNumberModel.app;
+    const app = phoneNumberModel.app;
     verifyOptions.host = verifyOptions.host || (app && app.get('host')) || 'localhost';
     verifyOptions.port = verifyOptions.port || (app && app.get('port')) || 3000;
     verifyOptions.restApiRoot = verifyOptions.restApiRoot || (app && app.get('restApiRoot')) || '/api';
 
-    var displayPort = (
+    const displayPort = (
       (verifyOptions.protocol === 'http' && verifyOptions.port == '80') ||
       (verifyOptions.protocol === 'https' && verifyOptions.port == '443')
     ) ? '' : ':' + verifyOptions.port;
 
-    var urlPath = joinUrlPath(
+    const urlPath = joinUrlPath(
       verifyOptions.restApiRoot,
       phoneNumberModel.http.path,
       phoneNumberModel.sharedClass.findMethodByName('confirm').http.path
@@ -150,7 +150,7 @@ module.exports = function(PhoneNumber) {
     assertVerifyOptions(verifyOptions);
 
     // argument "options" is passed depending on verifyOptions.generateVerificationToken function requirements
-    var tokenGenerator = verifyOptions.generateVerificationToken;
+    const tokenGenerator = verifyOptions.generateVerificationToken;
     if (tokenGenerator.length == 3) {
       tokenGenerator(phoneNumber, options, addTokenToUserAndSave);
     } else {
@@ -159,7 +159,7 @@ module.exports = function(PhoneNumber) {
 
     function addTokenToUserAndSave(err, secret) {
       if (err) return cb(err);
-      var token = speakeasy.totp({
+      const token = speakeasy.totp({
         secret: secret,
         encoding: 'base32',
         step: 10 * 60,
@@ -178,7 +178,7 @@ module.exports = function(PhoneNumber) {
       verifyOptions.verificationToken = token;
 
       // argument "options" is passed depending on templateFn function requirements
-      var templateFn = verifyOptions.templateFn;
+      const templateFn = verifyOptions.templateFn;
       if (templateFn.length == 3) {
         templateFn(verifyOptions, options, setContentAndSend);
       } else {
@@ -195,7 +195,7 @@ module.exports = function(PhoneNumber) {
         delete verifyOptions.template;
 
         // argument "options" is passed depending on Email.send function requirements
-        var Email = verifyOptions.phoner;
+        const Email = verifyOptions.phoner;
         if (Email.send.length == 3) {
           Email.send(verifyOptions, options, handleAfterSend);
         } else {
@@ -227,8 +227,8 @@ module.exports = function(PhoneNumber) {
   }
 
   function createVerificationEmailBody(verifyOptions, options, cb) {
-    var template = loopback.template(verifyOptions.template);
-    var body = template(verifyOptions);
+    const template = loopback.template(verifyOptions.template);
+    const body = template(verifyOptions);
     cb(null, body);
   }
 
@@ -247,10 +247,10 @@ module.exports = function(PhoneNumber) {
   };
 
   PhoneNumber.setup = function() {
-    var PhoneNumberModel = this;
+    const PhoneNumberModel = this;
 
     PhoneNumberModel.setter.phone = function(value) {
-      var ph = phone(value);
+      const ph = phone(value);
       this.$phone = ph[0];
       this.$country = ph[1];
     };
@@ -261,7 +261,7 @@ module.exports = function(PhoneNumber) {
 
     // Make sure verified is not set by creation
     PhoneNumberModel.beforeRemote('create', function(ctx, user, next) {
-      var body = ctx.req.body;
+      const body = ctx.req.body;
       if (body && body.verified) {
         body.verified = false;
       }
@@ -298,8 +298,8 @@ module.exports = function(PhoneNumber) {
     if (ctx.isNewInstance) {
       ctx.instance.masked = ctx.instance.phone;
     } else {
-      var isPartialUpdateChangingPhone = ctx.data && 'phone' in ctx.data;
-      var isFullReplaceChangingPhone = !!ctx.instance;
+      const isPartialUpdateChangingPhone = ctx.data && 'phone' in ctx.data;
+      const isFullReplaceChangingPhone = !!ctx.instance;
 
       if (isPartialUpdateChangingPhone || isFullReplaceChangingPhone) {
         if (ctx.instance) {
@@ -320,7 +320,7 @@ module.exports = function(PhoneNumber) {
 
 // TODO: proper phone number validator
 function phoneValidator(err) {
-  var value = this.phone;
+  const value = this.phone;
   if (value == null)
     return;
   if (typeof value !== 'string')
@@ -331,9 +331,9 @@ function phoneValidator(err) {
 }
 
 function joinUrlPath(args) {
-  var result = arguments[0];
-  for (var ix = 1; ix < arguments.length; ix++) {
-    var next = arguments[ix];
+  let result = arguments[0];
+  for (let ix = 1; ix < arguments.length; ix++) {
+    const next = arguments[ix];
     result += result[result.length - 1] === '/' && next[0] === '/' ?
       next.slice(1) : next;
   }

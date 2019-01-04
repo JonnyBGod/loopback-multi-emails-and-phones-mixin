@@ -1,5 +1,5 @@
 'use strict';
-var g = require('strong-globalize')();
+const g = require('strong-globalize')();
 
 /**
 * Phone model.  Extends LoopBack base [Model](#model-new-model).
