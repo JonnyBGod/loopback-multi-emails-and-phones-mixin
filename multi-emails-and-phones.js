@@ -20,8 +20,8 @@ module.exports = function(User, options) {
   require('./models/phone.js')(Phone);
 
   const emailAddressSchema = require('./models/emailAddress.json');
-  if (options.showEmail) {
-    emailAddressSchema.hidden.splice(emailAddressSchema.hidden.indexOf('email'), 1);
+  if (options.hideEmail) {
+    emailAddressSchema.hidden.push('email');
   }
 
   const EmailAddress = User.registry.createModel(emailAddressSchema);
@@ -34,8 +34,8 @@ module.exports = function(User, options) {
   User.embedsMany(EmailAddress, {as: 'emails', options: {persistent: true, validate: false}});
 
   const phoneNumberSchema = require('./models/phoneNumber.json');
-  if (options.showPhone) {
-    phoneNumberSchema.hidden.splice(phoneNumberSchema.hidden.indexOf('phone'), 1);
+  if (options.hidePhone) {
+    phoneNumberSchema.hidden.push('phone');
   }
 
   const PhoneNumber = User.registry.createModel(phoneNumberSchema);

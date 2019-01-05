@@ -25,7 +25,7 @@
       "type": "string"
     }
   },
-  "hidden": ["verificationToken", "phone"],
+  "hidden": ["verificationToken"],
   "validations": [],
   "relations": {},
   "acls": [
