@@ -5,7 +5,7 @@
   "properties": {
     "phone": {
       "type": "string",
-      "required": true
+      "required": false
     },
     "masked": {
       "type": "string"
